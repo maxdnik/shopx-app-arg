@@ -1,0 +1,1318 @@
+import { LinearGradient } from "expo-linear-gradient";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { AppBottomNav } from "../../components/AppBottomNav";
+import { ProductCard } from "../../components/ProductCard";
+import {
+  formatUSD,
+  getDisplayFinalPriceUSD,
+  getProductImage,
+  getProducts,
+  searchProducts,
+  ShopXProduct,
+} from "../../lib/api";
+import { saveProductToCache } from "../../lib/product-cache";
+import { getAppAccount, getStoredUser, ShopXUser } from "../../lib/auth";
+
+const navy = "#062B4F";
+const navyDark = "#031A33";
+const navyDeep = "#021326";
+const text = "#071E35";
+const muted = "#718096";
+const accent = "#18C7D8";
+const soft = "#F7FAFC";
+const border = "#E2E8F0";
+const white = "#FFFFFF";
+const yellow = "#F6C343";
+
+const categories = [
+  { icon: "view-grid-outline", label: "Todo", type: "material" },
+  { icon: "headphones", label: "Tecnología", type: "feather" },
+  { icon: "sofa-outline", label: "Hogar", type: "material" },
+  { icon: "tshirt-crew-outline", label: "Moda", type: "material" },
+  { icon: "watch-variant", label: "Relojes", type: "material" },
+  { icon: "shoe-sneaker", label: "Deportes", type: "material" },
+];
+
+function getProductSlug(product: ShopXProduct) {
+  return product.slug || product._id || product.id || product.externalId || "";
+}
+
+function openProduct(product: ShopXProduct) {
+  const slug = getProductSlug(product);
+  if (!slug) return;
+
+  saveProductToCache(product);
+  router.push(`/product/${slug}`);
+}
+
+function getUserCity(user: ShopXUser | null) {
+  const city = user?.address?.city || user?.billing?.city || "";
+  return String(city || "").trim();
+}
+
+function getUserProvince(user: ShopXUser | null) {
+  const province = user?.address?.province || user?.billing?.province || "";
+  return String(province || "").trim();
+}
+
+function buildDeliveryLabel(user: ShopXUser | null) {
+  const city = getUserCity(user);
+  const province = getUserProvince(user);
+
+  if (!city) return "";
+
+  return [city, province].filter(Boolean).join(", ");
+}
+
+function CategoryIcon({
+  icon,
+  type,
+  active,
+}: {
+  icon: string;
+  type: string;
+  active: boolean;
+}) {
+  const color = active ? white : navy;
+
+  if (type === "feather") {
+    return <Feather name={icon as any} size={22} color={color} />;
+  }
+
+  return <MaterialCommunityIcons name={icon as any} size={25} color={color} />;
+}
+
+export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
+
+  const [products, setProducts] = useState<ShopXProduct[]>([]);
+  const [searchResults, setSearchResults] = useState<ShopXProduct[]>([]);
+  const [homeSearch, setHomeSearch] = useState("");
+  const [deliveryLabel, setDeliveryLabel] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [searchError, setSearchError] = useState("");
+
+  const isSearching = homeSearch.trim().length > 0;
+
+  async function loadProducts() {
+    setLoading(true);
+    setErrorMessage("");
+
+    try {
+      const result = await getProducts(100);
+      setProducts(result);
+    } catch (error) {
+      console.log("ERROR HOME PRODUCTS:", error);
+      setErrorMessage("No pudimos cargar los productos.");
+    }
+
+    setLoading(false);
+  }
+
+  async function loadDeliveryProfile() {
+    try {
+      const storedUser = await getStoredUser();
+      const storedLabel = buildDeliveryLabel(storedUser);
+
+      setDeliveryLabel(storedLabel || "");
+
+      if (!storedUser) return;
+
+      try {
+        const account = await getAppAccount();
+        const freshLabel = buildDeliveryLabel(account.user);
+        setDeliveryLabel(freshLabel || "");
+      } catch (error) {
+        console.log("ERROR HOME DELIVERY PROFILE:", error);
+      }
+    } catch (error) {
+      console.log("ERROR HOME STORED DELIVERY PROFILE:", error);
+      setDeliveryLabel("");
+    }
+  }
+
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDeliveryProfile();
+    }, [])
+  );
+
+  useEffect(() => {
+    const cleanQuery = homeSearch.trim();
+
+    if (!cleanQuery) {
+      setSearchResults([]);
+      setSearchError("");
+      setSearchLoading(false);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      setSearchLoading(true);
+      setSearchError("");
+
+      try {
+        const result = await searchProducts(cleanQuery);
+        setSearchResults(result);
+      } catch (error) {
+        console.log("ERROR HOME SEARCH:", error);
+        setSearchResults([]);
+        setSearchError("No pudimos buscar productos en este momento.");
+      }
+
+      setSearchLoading(false);
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [homeSearch]);
+
+  const featuredProducts = useMemo(() => products.slice(0, 8), [products]);
+  const recommendedProducts = useMemo(() => products.slice(8, 16), [products]);
+  const heroProduct = products[0];
+  const visibleProducts = isSearching ? searchResults : featuredProducts;
+  const heroImage = heroProduct ? getProductImage(heroProduct) : "";
+  const locationText = deliveryLabel || "Configurar ubicación";
+
+  return (
+    <View style={styles.app}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={[styles.topArea, { paddingTop: insets.top + 10 }]}>
+          <View style={styles.cleanHeader}>
+            <Image
+              source={require("../../assets/images/shopx-logo-horizontal.png")}
+              style={styles.cleanLogo}
+              resizeMode="contain"
+            />
+
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.notificationButton}
+                activeOpacity={0.9}
+                onPress={() => {
+                  console.log("Notifications pressed");
+                }}
+              >
+                <Ionicons name="notifications-outline" size={19} color={text} />
+                <View style={styles.notificationDot} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cartButton}
+                activeOpacity={0.9}
+                onPress={() => router.push("/cart")}
+              >
+                <Feather name="shopping-cart" size={20} color={white} />
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>2</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.searchLocationCard}>
+            <View style={styles.cyanAccent} />
+
+            <View style={styles.searchLocationRow}>
+              <Feather name="search" size={23} color="#64748B" />
+
+              <TextInput
+                value={homeSearch}
+                onChangeText={setHomeSearch}
+                placeholder="Buscar productos, marcas..."
+                placeholderTextColor="#95A3B8"
+                style={styles.searchInput}
+                returnKeyType="search"
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+
+              {homeSearch.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.clearButton}
+                  onPress={() => setHomeSearch("")}
+                >
+                  <Text style={styles.clearSearch}>×</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.cameraButton} activeOpacity={0.9}>
+                  <Ionicons name="camera-outline" size={20} color={text} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.integratedDivider} />
+
+            <TouchableOpacity
+              style={styles.deliveryRow}
+              activeOpacity={0.9}
+              onPress={() => router.push("/profile")}
+            >
+              <Feather name="map-pin" size={19} color={text} />
+
+              <Text style={styles.deliveryText} numberOfLines={1}>
+                Enviar a: <Text style={styles.deliveryStrong}>{locationText}</Text>
+              </Text>
+
+              <Feather name="chevron-down" size={17} color={text} />
+            </TouchableOpacity>
+          </View>
+
+          {!isSearching && (
+            <>
+              <View style={styles.benefitStrip}>
+                <View style={styles.benefitStripItem}>
+                  <View style={styles.benefitStripIcon}>
+                    <MaterialCommunityIcons
+                      name="currency-usd"
+                      size={21}
+                      color={navy}
+                    />
+                  </View>
+
+                  <View style={styles.benefitTextBox}>
+                    <Text style={styles.benefitMain}>Precio final</Text>
+                    <Text style={styles.benefitAccent}>en pesos</Text>
+                  </View>
+                </View>
+
+                <View style={styles.benefitVerticalDivider} />
+
+                <View style={styles.benefitStripItem}>
+                  <View style={styles.benefitStripIcon}>
+                    <MaterialCommunityIcons
+                      name="truck-delivery-outline"
+                      size={23}
+                      color={navy}
+                    />
+                  </View>
+
+                  <View style={styles.benefitTextBox}>
+                    <Text style={styles.benefitMain}>Entrega</Text>
+                    <Text style={styles.benefitAccent}>5–10 días</Text>
+                  </View>
+                </View>
+
+                <View style={styles.benefitVerticalDivider} />
+
+                <View style={styles.benefitStripItem}>
+                  <View style={styles.benefitStripIcon}>
+                    <MaterialCommunityIcons
+                      name="shield-check-outline"
+                      size={23}
+                      color={navy}
+                    />
+                  </View>
+
+                  <View style={styles.benefitTextBox}>
+                    <Text style={styles.benefitMain}>Compra</Text>
+                    <Text style={styles.benefitAccent}>protegida</Text>
+                  </View>
+                </View>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.categoriesRow}
+              >
+                {categories.map((category, index) => {
+                  const active = index === 0;
+
+                  return (
+                    <TouchableOpacity
+                      key={category.label}
+                      style={styles.categoryItem}
+                      activeOpacity={0.9}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/categories",
+                          params: { category: category.label },
+                        })
+                      }
+                    >
+                      <View
+                        style={[
+                          styles.categoryIcon,
+                          active && styles.categoryIconActive,
+                        ]}
+                      >
+                        <CategoryIcon
+                          icon={category.icon}
+                          type={category.type}
+                          active={active}
+                        />
+                      </View>
+
+                      <Text
+                        style={[
+                          styles.categoryLabel,
+                          active && styles.categoryLabelActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {category.label}
+                      </Text>
+
+                      {active && <View style={styles.activeUnderline} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <TouchableOpacity
+                activeOpacity={0.92}
+                onPress={() => {
+                  if (heroProduct) {
+                    openProduct(heroProduct);
+                  } else {
+                    router.push("/categories");
+                  }
+                }}
+              >
+                <LinearGradient
+                  colors={[navyDeep, navyDark, "#083B69"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.heroCard}
+                >
+                  <View style={styles.heroLeft}>
+                    <View style={styles.heroPill}>
+                      <Text style={styles.heroFlag}>🇺🇸</Text>
+                      <Text style={styles.heroPillText}>Comprá en USA</Text>
+                    </View>
+
+                    <Text style={styles.heroTitle}>
+                      Comprá{"\n"}en{"\n"}USA.{"\n"}Recibí en{"\n"}
+                      <Text style={styles.heroAccent}>Argentina</Text>
+                    </Text>
+
+                    <Text style={styles.heroSubtitle}>
+                      Productos originales,{"\n"}precio final y{"\n"}seguimiento
+                      real.
+                    </Text>
+
+                    <TouchableOpacity
+                      style={styles.heroButton}
+                      onPress={() => router.push("/categories")}
+                    >
+                      <Text style={styles.heroButtonText}>Ver productos</Text>
+                      <Feather name="arrow-right" size={18} color={text} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.heroProduct}>
+                    <Text style={styles.heroProductLabel} numberOfLines={2}>
+                      {heroProduct?.title || 'MacBook Pro 16"'}
+                    </Text>
+
+                    <Text style={styles.heroProductPrice}>
+                      {heroProduct
+                        ? `USD ${formatUSD(getDisplayFinalPriceUSD(heroProduct))}`
+                        : "USD 2,499"}
+                    </Text>
+
+                    <View style={styles.starsRow}>
+                      <Text style={styles.stars}>★ ★ ★ ★ ◐</Text>
+                      <Text style={styles.reviews}>(128)</Text>
+                    </View>
+
+                    <View style={styles.productVisual}>
+                      {heroImage ? (
+                        <Image
+                          source={{ uri: heroImage }}
+                          style={styles.heroProductImage}
+                        />
+                      ) : (
+                        <Image
+                          source={{
+                            uri: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/mbp16-spaceblack-select-202410",
+                          }}
+                          style={styles.heroProductImage}
+                        />
+                      )}
+                    </View>
+
+                    <View style={styles.heroDots}>
+                      <View style={styles.dotActive} />
+                      <View style={styles.dot} />
+                      <View style={styles.dot} />
+                    </View>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionIcon}>
+              <Feather name="star" size={17} color={white} />
+            </View>
+
+            <Text
+              style={styles.sectionTitle}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+            >
+              {isSearching
+                ? `Resultados para "${homeSearch}"`
+                : "Productos destacados"}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.viewAllButton}
+            onPress={() =>
+              isSearching ? setHomeSearch("") : router.push("/categories")
+            }
+          >
+            <Text style={styles.viewAll}>
+              {isSearching ? "Limpiar" : "Ver todos"}
+            </Text>
+            <Feather name="chevron-right" size={22} color={accent} />
+          </TouchableOpacity>
+        </View>
+
+        {loading && !isSearching ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={navy} />
+            <Text style={styles.loadingText}>Cargando productos...</Text>
+          </View>
+        ) : searchLoading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={navy} />
+            <Text style={styles.loadingText}>Buscando productos...</Text>
+          </View>
+        ) : errorMessage && !isSearching ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>No pudimos cargar productos</Text>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+
+            <TouchableOpacity style={styles.retryButton} onPress={loadProducts}>
+              <Text style={styles.retryButtonText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : searchError ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>No pudimos buscar productos</Text>
+            <Text style={styles.errorText}>{searchError}</Text>
+
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => {
+                const currentSearch = homeSearch;
+                setHomeSearch("");
+                setTimeout(() => setHomeSearch(currentSearch), 80);
+              }}
+            >
+              <Text style={styles.retryButtonText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : visibleProducts.length === 0 ? (
+          <View style={styles.emptySearchBox}>
+            <Feather name="search" size={42} color={muted} />
+            <Text style={styles.emptySearchTitle}>No encontramos productos</Text>
+            <Text style={styles.emptySearchText}>
+              Probá buscar por marca, modelo o categoría.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.productsGrid}>
+            {visibleProducts.map((product, index) => {
+              const key =
+                product._id ||
+                product.id ||
+                product.slug ||
+                `${product.title}-${index}`;
+
+              return (
+                <View key={key} style={styles.productGridItem}>
+                  <ProductCard
+                    product={product}
+                    variant="deal"
+                    onPress={() => openProduct(product)}
+                  />
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {!isSearching && (
+          <>
+            <LinearGradient
+              colors={[navyDark, navy]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.quoteBanner}
+            >
+              <View style={styles.quoteIcon}>
+                <Feather name="link" size={24} color={navy} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.quoteTitle}>¿Viste algo en USA?</Text>
+                <Text style={styles.quoteText}>
+                  Pegá el link y te cotizamos el precio final en Argentina.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.quoteButton}
+                onPress={() => router.push("/quote")}
+              >
+                <Text style={styles.quoteButtonText}>Cotizar</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <View style={styles.sectionHeaderSimple}>
+              <Text style={styles.sectionTitle}>Curado por ShopX</Text>
+
+              <TouchableOpacity
+                style={styles.viewAllButton}
+                onPress={() => router.push("/categories")}
+              >
+                <Text style={styles.viewAll}>Ver todo</Text>
+                <Feather name="chevron-right" size={22} color={accent} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.productsGrid}>
+              {(recommendedProducts.length > 0
+                ? recommendedProducts
+                : featuredProducts
+              ).map((product, index) => {
+                const key =
+                  product._id ||
+                  product.id ||
+                  product.slug ||
+                  `recommended-${product.title}-${index}`;
+
+                return (
+                  <View key={key} style={styles.productGridItem}>
+                    <ProductCard
+                      product={product}
+                      variant="compact"
+                      showCartButton={false}
+                      onPress={() => openProduct(product)}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
+
+        <View style={{ height: 145 }} />
+      </ScrollView>
+
+      <AppBottomNav />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  app: {
+    flex: 1,
+    backgroundColor: soft,
+  },
+
+  screen: {
+    flex: 1,
+    backgroundColor: soft,
+  },
+
+  content: {
+    paddingBottom: 0,
+  },
+
+  topArea: {
+    paddingHorizontal: 18,
+    paddingBottom: 4,
+    backgroundColor: soft,
+  },
+
+  cleanHeader: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  cleanLogo: {
+    width: 132,
+    height: 40,
+  },
+
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+
+  notificationButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#DDE7F0",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+
+    shadowColor: navy,
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+
+  notificationDot: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: accent,
+  },
+
+  cartButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: navy,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+
+    shadowColor: navy,
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+
+  cartBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    backgroundColor: accent,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: soft,
+  },
+
+  cartBadgeText: {
+    color: white,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  searchLocationCard: {
+    marginTop: 5,
+    minHeight: 116,
+    borderRadius: 24,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#DDE7F0",
+    overflow: "hidden",
+
+    shadowColor: navy,
+    shadowOpacity: 0.055,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 3,
+  },
+
+  cyanAccent: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: accent,
+    borderTopLeftRadius: 24,
+    borderBottomLeftRadius: 24,
+  },
+
+  searchLocationRow: {
+    minHeight: 59,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 21,
+    paddingRight: 15,
+  },
+
+  searchInput: {
+    flex: 1,
+    color: text,
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 11,
+    paddingVertical: 0,
+  },
+
+  cameraButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: "#EEF2F7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  clearButton: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  clearSearch: {
+    color: "#8FA0B6",
+    fontSize: 28,
+    fontWeight: "900",
+  },
+
+  integratedDivider: {
+    height: 1,
+    backgroundColor: "#E6ECF2",
+    marginLeft: 21,
+    marginRight: 21,
+  },
+
+  deliveryRow: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 21,
+    paddingRight: 17,
+  },
+
+  deliveryText: {
+    flex: 1,
+    marginLeft: 11,
+    color: muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  deliveryStrong: {
+    color: text,
+    fontWeight: "900",
+  },
+
+  benefitStrip: {
+    marginTop: 17,
+    minHeight: 72,
+    borderRadius: 22,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#E0E8F0",
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+
+    shadowColor: navy,
+    shadowOpacity: 0.045,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+
+  benefitStripItem: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+
+  benefitStripIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#EAFBFD",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+
+  benefitTextBox: {
+    minWidth: 0,
+  },
+
+  benefitMain: {
+    color: text,
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: "800",
+  },
+
+  benefitAccent: {
+    color: accent,
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: "900",
+  },
+
+  benefitVerticalDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: "#DDE6EF",
+  },
+
+  categoriesRow: {
+    paddingTop: 21,
+    paddingBottom: 12,
+    gap: 14,
+  },
+
+  categoryItem: {
+    width: 62,
+    alignItems: "center",
+    position: "relative",
+    paddingBottom: 10,
+  },
+
+  categoryIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#DDE7F0",
+    alignItems: "center",
+    justifyContent: "center",
+
+    shadowColor: navy,
+    shadowOpacity: 0.045,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+
+  categoryIconActive: {
+    backgroundColor: navy,
+    borderColor: navy,
+    shadowOpacity: 0.13,
+  },
+
+  categoryLabel: {
+    marginTop: 8,
+    color: "#667995",
+    fontSize: 11.5,
+    fontWeight: "800",
+  },
+
+  categoryLabelActive: {
+    color: text,
+    fontWeight: "900",
+  },
+
+  activeUnderline: {
+    position: "absolute",
+    bottom: 0,
+    width: 42,
+    height: 3,
+    borderRadius: 99,
+    backgroundColor: accent,
+  },
+
+  heroCard: {
+    marginTop: 12,
+    minHeight: 255,
+    borderRadius: 26,
+    padding: 16,
+    flexDirection: "row",
+    overflow: "hidden",
+    shadowColor: navy,
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
+  },
+
+  heroLeft: {
+    flex: 1,
+    justifyContent: "space-between",
+    zIndex: 2,
+    paddingRight: 8,
+  },
+
+  heroPill: {
+    alignSelf: "flex-start",
+    height: 26,
+    borderRadius: 99,
+    paddingHorizontal: 9,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    maxWidth: 130,
+  },
+
+  heroFlag: {
+    fontSize: 13,
+  },
+
+  heroPillText: {
+    color: white,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  heroTitle: {
+    marginTop: 10,
+    color: white,
+    fontSize: 23,
+    lineHeight: 26,
+    fontWeight: "900",
+    letterSpacing: -0.7,
+  },
+
+  heroAccent: {
+    color: accent,
+  },
+
+  heroSubtitle: {
+    marginTop: 10,
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+  },
+
+  heroButton: {
+    marginTop: 14,
+    width: 132,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: white,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  heroButtonText: {
+    color: text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  heroProduct: {
+    width: 145,
+    borderRadius: 22,
+    borderWidth: 1.4,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    padding: 12,
+    alignSelf: "center",
+  },
+
+  heroProductLabel: {
+    color: white,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  heroProductPrice: {
+    marginTop: 5,
+    color: accent,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  starsRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  stars: {
+    color: yellow,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  reviews: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  productVisual: {
+    marginTop: 11,
+    height: 88,
+    borderRadius: 9,
+    backgroundColor: white,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+
+  heroProductImage: {
+    width: "95%",
+    height: "95%",
+    resizeMode: "contain",
+  },
+
+  heroDots: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 7,
+  },
+
+  dotActive: {
+    width: 7,
+    height: 7,
+    borderRadius: 99,
+    backgroundColor: accent,
+  },
+
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 99,
+    backgroundColor: "rgba(255,255,255,0.35)",
+  },
+
+  sectionHeader: {
+    paddingHorizontal: 22,
+    marginTop: 24,
+    marginBottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+
+  sectionHeaderSimple: {
+    paddingHorizontal: 22,
+    marginTop: 30,
+    marginBottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    minWidth: 0,
+    gap: 12,
+  },
+
+  sectionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  sectionTitle: {
+    flex: 1,
+    color: text,
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: -0.5,
+  },
+
+  viewAllButton: {
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  viewAll: {
+    color: accent,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  loadingBox: {
+    marginHorizontal: 22,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: border,
+    backgroundColor: white,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  loadingText: {
+    color: muted,
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 10,
+  },
+
+  errorBox: {
+    marginHorizontal: 22,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: border,
+    backgroundColor: white,
+    padding: 24,
+  },
+
+  errorTitle: {
+    color: text,
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+
+  errorText: {
+    color: muted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+
+  retryButton: {
+    alignSelf: "flex-start",
+    backgroundColor: navy,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+
+  retryButtonText: {
+    color: white,
+    fontWeight: "900",
+    fontSize: 14,
+  },
+
+  emptySearchBox: {
+    marginHorizontal: 22,
+    borderRadius: 24,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: border,
+    padding: 26,
+    alignItems: "center",
+  },
+
+  emptySearchTitle: {
+    color: text,
+    fontSize: 20,
+    fontWeight: "900",
+    marginTop: 12,
+    marginBottom: 6,
+  },
+
+  emptySearchText: {
+    color: muted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+
+  productsGrid: {
+    paddingHorizontal: 6,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 0.2,
+  },
+
+  productGridItem: {
+    width: "50%",
+    paddingHorizontal: 0.2,
+    marginBottom: 0.2,
+  },
+
+  quoteBanner: {
+    marginHorizontal: 22,
+    marginTop: 30,
+    borderRadius: 24,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: navy,
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
+  },
+
+  quoteIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: white,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+
+  quoteTitle: {
+    color: white,
+    fontSize: 17,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+
+  quoteText: {
+    color: "#D7E2EF",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+
+  quoteButton: {
+    backgroundColor: white,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginLeft: 10,
+  },
+
+  quoteButtonText: {
+    color: text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+});
