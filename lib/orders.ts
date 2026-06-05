@@ -85,6 +85,33 @@ export type CreateAppOrderPayload = {
   exchangeRateUsed?: number;
 };
 
+
+export type CreateMercadoPagoCheckoutPayload = {
+  /** Para pagar una orden existente desde pantalla de pedido. */
+  orderId?: string;
+  orderNumber?: string;
+  checkoutSessionId?: string;
+  mongoId?: string;
+
+  /** Para iniciar checkout desde carrito SIN crear todavía la orden real. */
+  buyer?: AppOrderBuyer;
+  destination?: AppOrderDestination;
+  items?: AppOrderItem[];
+  totalUSD?: number;
+  totalARS?: number;
+  pricingBreakdown?: PricingBreakdownRow[];
+  shippingUSD?: number;
+  otherFeesUSD?: number;
+  exchangeRateUsed?: number;
+
+  email?: string;
+  phone?: string;
+  exchangeRate?: number;
+  successUrl?: string;
+  failureUrl?: string;
+  pendingUrl?: string;
+};
+
 export type AppOrder = {
   _id: string;
   orderNumber: string;
@@ -150,6 +177,7 @@ export type MercadoPagoCheckoutResponse = {
   ok: boolean;
   orderId?: string;
   orderNumber?: string;
+  checkoutSessionId?: string;
   totalUSD?: number;
   exchangeRateUsed?: number;
   totalARS?: number;
@@ -304,15 +332,9 @@ export async function getAppOrderById(params: {
   return data.order || null;
 }
 
-export async function createMercadoPagoCheckout(params: {
-  orderId: string;
-  email?: string;
-  phone?: string;
-  exchangeRate?: number;
-  successUrl?: string;
-  failureUrl?: string;
-  pendingUrl?: string;
-}): Promise<MercadoPagoCheckoutResponse> {
+export async function createMercadoPagoCheckout(
+  params: CreateMercadoPagoCheckoutPayload
+): Promise<MercadoPagoCheckoutResponse> {
   const authHeaders = await getAuthHeaders();
 
   const response = await fetch(buildApiUrl("/api/app/checkout/mercadopago"), {

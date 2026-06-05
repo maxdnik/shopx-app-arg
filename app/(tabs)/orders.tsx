@@ -1,7 +1,8 @@
-import { useFocusEffect, router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Linking,
   RefreshControl,
   ScrollView,
@@ -15,7 +16,7 @@ import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { formatUSD } from "../../lib/api";
 import { fetchCurrentUser, getStoredUser, ShopXUser } from "../../lib/auth";
-import { AppOrder, getAppOrders } from "../../lib/orders";
+import { AppOrder, createMercadoPagoCheckout, getAppOrders } from "../../lib/orders";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -26,496 +27,302 @@ const soft = "#F7FAFC";
 const softCard = "#F1F5F9";
 const border = "#E2E8F0";
 const white = "#FFFFFF";
+const green = "#0EA371";
+const greenSoft = "#E7FFF4";
+const orange = "#F59E0B";
+const orangeSoft = "#FFF7E6";
+const red = "#DC2626";
+const redSoft = "#FEF2F2";
 
-type OrderStatus =
-  | "pending_payment"
-  | "purchased"
-  | "miami"
-  | "traveling"
-  | "argentina"
-  | "delivered"
-  | "cancelled";
+type FilterKey = "active" | "delivered" | "all";
+type VisualStep = "pending_payment" | "paid" | "processing" | "miami" | "traveling" | "argentina" | "delivered" | "cancelled";
 
-type TabFilter = "active" | "delivered" | "all";
-
-const steps: { key: OrderStatus; label: string; icon: string }[] = [
-  { key: "purchased", label: "Comprado", icon: "check" },
+const timelineSteps: { key: VisualStep; label: string; icon: string }[] = [
+  { key: "paid", label: "Pago", icon: "check-circle" },
+  { key: "processing", label: "Compra", icon: "shopping-bag" },
   { key: "miami", label: "Miami", icon: "home" },
-  { key: "traveling", label: "En viaje", icon: "navigation" },
+  { key: "traveling", label: "Viaje", icon: "navigation" },
   { key: "argentina", label: "Argentina", icon: "map-pin" },
-  { key: "delivered", label: "Entregado", icon: "package" },
+  { key: "delivered", label: "Entrega", icon: "package" },
 ];
 
-function normalizeStep(step?: string): OrderStatus | null {
-  const clean = String(step || "").toLowerCase();
-
-  if (clean === "pending_payment") return "pending_payment";
-  if (clean === "purchased" || clean === "paid") return "purchased";
-
-  if (
-    clean === "miami" ||
-    clean === "warehouse" ||
-    clean === "in_miami_warehouse" ||
-    clean === "received_miami"
-  ) {
-    return "miami";
-  }
-
-  if (
-    clean === "traveling" ||
-    clean === "in_transit" ||
-    clean === "shipped"
-  ) {
-    return "traveling";
-  }
-
-  if (
-    clean === "argentina" ||
-    clean === "customs" ||
-    clean === "local_delivery"
-  ) {
-    return "argentina";
-  }
-
-  if (clean === "delivered") return "delivered";
-  if (clean === "cancelled" || clean === "canceled") return "cancelled";
-
-  return null;
-}
-
-function getStepIndex(status: OrderStatus) {
-  if (status === "pending_payment" || status === "cancelled") return -1;
-
-  return steps.findIndex((step) => step.key === status);
-}
-
-function getOrderVisualStatus(order: AppOrder): OrderStatus {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-
-  if (
-    trackingStep &&
-    trackingStep !== "pending_payment" &&
-    trackingStep !== "cancelled"
-  ) {
-    return trackingStep;
-  }
-
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  if (status === "delivered") return "delivered";
-
-  if (
-    status === "argentina" ||
-    status === "customs" ||
-    status === "local_delivery"
-  ) {
-    return "argentina";
-  }
-
-  if (
-    status === "in_transit" ||
-    status === "traveling" ||
-    status === "shipped"
-  ) {
-    return "traveling";
-  }
-
-  if (
-    status === "miami" ||
-    status === "warehouse" ||
-    status === "in_miami_warehouse" ||
-    status === "received_miami"
-  ) {
-    return "miami";
-  }
-
-  if (
-    paymentStatus === "approved" ||
-    status === "paid" ||
-    status === "processing"
-  ) {
-    return "purchased";
-  }
-
-  return "purchased";
-}
-
-function isDelivered(order: AppOrder) {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const status = String(order.status || "").toLowerCase();
-
-  return trackingStep === "delivered" || status === "delivered";
-}
-
-function isCancelled(order: AppOrder) {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  return (
-    trackingStep === "cancelled" ||
-    status === "cancelled" ||
-    status === "canceled" ||
-    paymentStatus === "rejected" ||
-    paymentStatus === "cancelled"
-  );
-}
-
-function isPendingPayment(order: AppOrder) {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  return (
-    trackingStep === "pending_payment" ||
-    status === "pending_payment" ||
-    paymentStatus === "pending"
-  );
-}
-
-function getOrderStatusLabel(order: AppOrder) {
-  if (order.tracking?.currentLabel) {
-    return order.tracking.currentLabel;
-  }
-
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  if (isCancelled(order)) return "Cancelado";
-  if (isDelivered(order)) return "Entregado";
-
-  if (paymentStatus === "approved" || status === "paid") {
-    return "Compra confirmada";
-  }
-
-  if (status === "processing") return "Compra en proceso";
-
-  if (
-    status === "in_miami_warehouse" ||
-    status === "miami" ||
-    status === "warehouse" ||
-    status === "received_miami"
-  ) {
-    return "Recibido en Miami";
-  }
-
-  if (
-    status === "in_transit" ||
-    status === "traveling" ||
-    status === "shipped"
-  ) {
-    return "En viaje a Argentina";
-  }
-
-  if (status === "argentina" || status === "customs") {
-    return "En Argentina";
-  }
-
-  if (isPendingPayment(order)) return "Pago pendiente";
-
-  return "Pedido creado";
-}
-
-function getOrderEta(order: AppOrder) {
-  if (order.tracking?.currentDescription) {
-    return order.tracking.currentDescription;
-  }
-
-  if (isCancelled(order)) return "El pedido fue cancelado.";
-  if (isDelivered(order)) return "Pedido entregado correctamente.";
-  if (isPendingPayment(order)) return "Pendiente de pago con Mercado Pago.";
-
-  const status = String(order.status || "").toLowerCase();
-
-  if (
-    status === "in_miami_warehouse" ||
-    status === "miami" ||
-    status === "warehouse" ||
-    status === "received_miami"
-  ) {
-    return "Preparando consolidación y despacho.";
-  }
-
-  if (
-    status === "in_transit" ||
-    status === "traveling" ||
-    status === "shipped"
-  ) {
-    return "Llega estimado: 5 a 7 días hábiles.";
-  }
-
-  if (status === "argentina" || status === "customs") {
-    return "En proceso de ingreso y distribución local.";
-  }
-
-  return "Seguimiento actualizado por ShopX.";
-}
-
-function getLastUpdate(order: AppOrder) {
-  const trackingUpdated = order.tracking?.lastUpdatedAt;
-
-  if (trackingUpdated) {
-    return formatDate(trackingUpdated);
-  }
-
-  if (order.updatedAt && order.updatedAt !== order.createdAt) {
-    return formatDate(order.updatedAt);
-  }
-
-  return formatDate(order.createdAt);
+function clean(value: any) {
+  return String(value || "").trim();
 }
 
 function formatDate(value?: string) {
   if (!value) return "Sin fecha";
 
-  try {
-    const date = new Date(value);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
 
-    return new Intl.DateTimeFormat("es-AR", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(date);
-  } catch {
-    return "Sin fecha";
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function getOrderId(order: AppOrder) {
+  return order._id || order.orderNumber;
+}
+
+function getItemImage(item: any) {
+  if (item?.image) return item.image;
+  if (item?.imageUrl) return item.imageUrl;
+  if (Array.isArray(item?.images) && item.images[0]) return item.images[0];
+  if (Array.isArray(item?.imageUrls) && item.imageUrls[0]) return item.imageUrls[0];
+  return null;
+}
+
+function getItemsCount(order: AppOrder) {
+  if (Number(order.itemsCount || 0) > 0) return Number(order.itemsCount);
+
+  return (order.items || []).reduce((sum: number, item: any) => {
+    return sum + Number(item.quantity || item.qty || 1);
+  }, 0);
+}
+
+function normalizeStep(value?: string): VisualStep | null {
+  const status = clean(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (!status) return null;
+  if (["pending_payment", "payment_pending"].includes(status)) return "pending_payment";
+  if (["paid", "payment_approved", "approved"].includes(status)) return "paid";
+  if (["processing", "purchased", "purchase_in_progress"].includes(status)) return "processing";
+  if (["miami", "warehouse", "in_miami_warehouse", "received_miami"].includes(status)) return "miami";
+  if (["traveling", "in_transit", "transit", "viaje", "en viaje a argentina"].includes(status)) return "traveling";
+  if (
+    [
+      "argentina",
+      "customs",
+      "local_delivery",
+      "shipped",
+      "despachado",
+      "enviado",
+      "enviado correo local",
+      "en argentina",
+      "llego a argentina",
+    ].includes(status)
+  ) {
+    return "argentina";
   }
+  if (status === "delivered") return "delivered";
+  if (["cancelled", "canceled", "rejected", "refunded"].includes(status)) return "cancelled";
+
+  return null;
+}
+
+function getVisualStep(order: AppOrder): VisualStep {
+  const status = clean(order.status).toLowerCase();
+  const paymentStatus = clean(order.paymentStatus).toLowerCase();
+  const trackingStep = normalizeStep(order.tracking?.currentStep);
+  const trackingLabel = normalizeStep(order.tracking?.currentLabel);
+  const normalizedStatus = normalizeStep(status);
+
+  // IMPORTANTE:
+  // En el admin, el estado "shipped" significa "Enviado (Correo Local)".
+  // Eso ya corresponde al tramo Argentina, no al tramo Viaje.
+  // Además, puede haber órdenes viejas con tracking.currentStep="traveling"
+  // y status="shipped". Por eso el status real debe ganar en este caso.
+  if (["shipped", "local_delivery", "argentina", "customs"].includes(status)) {
+    return "argentina";
+  }
+
+  if (normalizedStatus === "delivered" || trackingStep === "delivered") return "delivered";
+  if (normalizedStatus === "cancelled" || trackingStep === "cancelled") return "cancelled";
+
+  if (trackingStep) return trackingStep;
+  if (trackingLabel) return trackingLabel;
+  if (normalizedStatus) return normalizedStatus;
+
+  if (["approved", "paid"].includes(paymentStatus)) return "paid";
+  if (["pending", "in_process"].includes(paymentStatus)) return "pending_payment";
+  if (["rejected", "cancelled", "canceled"].includes(paymentStatus)) return "cancelled";
+
+  return "processing";
+}
+
+function isDelivered(order: AppOrder) {
+  return getVisualStep(order) === "delivered";
+}
+
+function isCancelled(order: AppOrder) {
+  return getVisualStep(order) === "cancelled";
+}
+
+function isPendingPayment(order: AppOrder) {
+  return getVisualStep(order) === "pending_payment";
+}
+
+function isActive(order: AppOrder) {
+  return !isDelivered(order) && !isCancelled(order);
+}
+
+function getStepIndex(step: VisualStep) {
+  if (step === "pending_payment" || step === "cancelled") return -1;
+  return Math.max(0, timelineSteps.findIndex((item) => item.key === step));
+}
+
+function getStatusMeta(order: AppOrder) {
+  const step = getVisualStep(order);
+
+  if (order.tracking?.currentLabel && !isCancelled(order)) {
+    return {
+      label: order.tracking.currentLabel,
+      description:
+        order.tracking.currentDescription ||
+        "Tu pedido está avanzando dentro del circuito ShopX.",
+      color: navy,
+      bg: softCard,
+      icon: "map-pin",
+    };
+  }
+
+  const map: Record<VisualStep, any> = {
+    pending_payment: {
+      label: "Pago pendiente",
+      description: "Completá el pago para que iniciemos la compra en USA.",
+      color: orange,
+      bg: orangeSoft,
+      icon: "credit-card",
+    },
+    paid: {
+      label: "Pago confirmado",
+      description: "Recibimos tu pago y estamos preparando la compra.",
+      color: green,
+      bg: greenSoft,
+      icon: "check-circle",
+    },
+    processing: {
+      label: "Compra en proceso",
+      description: "Estamos gestionando tu producto con origen USA.",
+      color: navy,
+      bg: softCard,
+      icon: "shopping-bag",
+    },
+    miami: {
+      label: "Recibido en Miami",
+      description: "Tu compra llegó al depósito y será preparada para viajar.",
+      color: navy,
+      bg: softCard,
+      icon: "home",
+    },
+    traveling: {
+      label: "En viaje a Argentina",
+      description: "Tu pedido está viajando hacia Argentina.",
+      color: navy,
+      bg: softCard,
+      icon: "navigation",
+    },
+    argentina: {
+      label: "En Argentina",
+      description: "Tu pedido ya está en Argentina y avanza con la entrega local.",
+      color: navy,
+      bg: softCard,
+      icon: "map-pin",
+    },
+    delivered: {
+      label: "Entregado",
+      description: "Tu pedido fue entregado. Gracias por comprar con ShopX.",
+      color: green,
+      bg: greenSoft,
+      icon: "package",
+    },
+    cancelled: {
+      label: "Cancelado",
+      description: "Este pedido fue cancelado o rechazado.",
+      color: red,
+      bg: redSoft,
+      icon: "x-circle",
+    },
+  };
+
+  return map[step];
+}
+
+function getNextStepText(order: AppOrder) {
+  const step = getVisualStep(order);
+
+  const map: Record<VisualStep, string> = {
+    pending_payment: "Pagá el pedido para que ShopX pueda iniciar la compra.",
+    paid: "Nuestro equipo validará la orden y realizará la compra en USA.",
+    processing: "Te avisaremos cuando el producto llegue al depósito de Miami.",
+    miami: "El próximo paso es preparar el envío internacional a Argentina.",
+    traveling: "Te notificaremos cuando el pedido ingrese al circuito local.",
+    argentina: "Tu pedido ya está en Argentina. Estamos coordinando la entrega local.",
+    delivered: "Pedido finalizado. Podés volver a comprar o guardar favoritos.",
+    cancelled: "Si necesitás ayuda, contactá a soporte ShopX.",
+  };
+
+  return map[step];
 }
 
 function formatARS(value?: number) {
   const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
 
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return "ARS pendiente";
-  }
-
-  return `ARS ${Math.round(amount).toLocaleString("es-AR")}`;
-}
-
-function getOrderTotalARS(order: AppOrder) {
-  const totalARS = Number((order as any).totalARS || 0);
-
-  if (Number.isFinite(totalARS) && totalARS > 0) {
-    return totalARS;
-  }
-
-  const totalUSD = Number(order.totalUSD || 0);
-  const exchangeRateUsed = Number(order.exchangeRateUsed || 0);
-
-  if (
-    Number.isFinite(totalUSD) &&
-    totalUSD > 0 &&
-    Number.isFinite(exchangeRateUsed) &&
-    exchangeRateUsed > 0
-  ) {
-    return totalUSD * exchangeRateUsed;
-  }
-
-  return 0;
-}
-
-function getExchangeRateLabel(order: AppOrder) {
-  const rate = Number(order.exchangeRateUsed || 0);
-
-  if (!Number.isFinite(rate) || rate <= 0) {
-    return null;
-  }
-
-
-}
-
-function getItemsSummary(order: AppOrder) {
-  const items = Array.isArray(order.items) ? order.items : [];
-
-  if (!items.length) return "Producto ShopX";
-
-  const firstItem = items[0]?.title || "Producto ShopX";
-
-  if (items.length === 1) return firstItem;
-
-  return `${firstItem} + ${items.length - 1} producto${
-    items.length - 1 === 1 ? "" : "s"
-  }`;
-}
-
-function getBrandSummary(order: AppOrder) {
-  const items = Array.isArray(order.items) ? order.items : [];
-  const firstItem = items[0] as any;
-
-  const brand =
-    firstItem?.specs?.brand ||
-    firstItem?.brand ||
-    firstItem?.specs?.store ||
-    firstItem?.store ||
-    "SHOPX";
-
-  return String(brand).toUpperCase();
-}
-
-function OrderProgress({ status }: { status: OrderStatus }) {
-  const currentIndex = getStepIndex(status);
-
-  return (
-    <View style={styles.progressWrap}>
-      {steps.map((step, index) => {
-        const completed = currentIndex >= 0 && index <= currentIndex;
-        const isLast = index === steps.length - 1;
-
-        return (
-          <View key={step.key} style={styles.stepBlock}>
-            <View style={styles.stepTop}>
-              <View
-                style={[
-                  styles.stepCircle,
-                  completed && styles.stepCircleDone,
-                ]}
-              >
-                <Feather
-                  name={completed ? "check" : (step.icon as any)}
-                  size={completed ? 16 : 15}
-                  color={completed ? white : "#AAB6C8"}
-                />
-              </View>
-
-              {!isLast && (
-                <View style={styles.stepLineWrap}>
-                  <View
-                    style={[
-                      styles.stepLine,
-                      index < currentIndex && styles.stepLineDone,
-                    ]}
-                  />
-                </View>
-              )}
-            </View>
-
-            <Text
-              style={[styles.stepLabel, completed && styles.stepLabelDone]}
-              numberOfLines={1}
-            >
-              {step.label}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-function OrderCard({ order }: { order: AppOrder }) {
-  const visualStatus = getOrderVisualStatus(order);
-  const totalARS = getOrderTotalARS(order);
-  const exchangeRateLabel = getExchangeRateLabel(order);
-
-  return (
-    <View style={styles.orderCard}>
-      <View style={styles.orderTopRow}>
-        <View style={styles.orderInfo}>
-          <Text style={styles.orderId}>{order.orderNumber}</Text>
-
-          <Text style={styles.orderTitle} numberOfLines={2}>
-            {getItemsSummary(order)}
-          </Text>
-
-          <Text style={styles.orderBrand}>{getBrandSummary(order)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.statusBox}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.statusTitle}>{getOrderStatusLabel(order)}</Text>
-          <Text style={styles.statusText}>{getOrderEta(order)}</Text>
-        </View>
-
-        <View style={styles.priceBlock}>
-          <Text style={styles.priceARS}>{formatARS(totalARS)}</Text>
-          <Text style={styles.priceUSD}>USD {formatUSD(order.totalUSD)}</Text>
-
-          {exchangeRateLabel ? (
-            <Text style={styles.exchangeLabel}>{exchangeRateLabel}</Text>
-          ) : null}
-        </View>
-      </View>
-
-      <OrderProgress status={visualStatus} />
-
-      <View style={styles.divider} />
-
-      <View>
-        <Text style={styles.updateLabel}>ÚLTIMA ACTUALIZACIÓN</Text>
-        <Text style={styles.updateText}>{getLastUpdate(order)}</Text>
-      </View>
-
-      <TouchableOpacity
-        style={styles.primaryButtonFull}
-        onPress={() => router.push(`/order/${order.orderNumber || order._id}`)}
-      >
-        <Text style={styles.primaryButtonText}>Ver detalle</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
 export default function OrdersScreen() {
   const [user, setUser] = useState<ShopXUser | null>(null);
   const [orders, setOrders] = useState<AppOrder[]>([]);
+  const [filter, setFilter] = useState<FilterKey>("active");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<TabFilter>("active");
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const activeCount = useMemo(() => orders.filter(isActive).length, [orders]);
+  const deliveredCount = useMemo(() => orders.filter(isDelivered).length, [orders]);
+
+  const filteredOrders = useMemo(() => {
+    const source = [...orders].sort((a, b) => {
+      const aDate = new Date(a.createdAt || 0).getTime();
+      const bDate = new Date(b.createdAt || 0).getTime();
+      return bDate - aDate;
+    });
+
+    if (filter === "active") return source.filter(isActive);
+    if (filter === "delivered") return source.filter(isDelivered);
+    return source;
+  }, [orders, filter]);
 
   async function loadOrders(options?: { silent?: boolean }) {
-    if (!options?.silent) {
-      setLoading(true);
-    }
+    if (!options?.silent) setLoading(true);
+    setError("");
 
-    const storedUser = await getStoredUser();
+    try {
+      let nextUser = await getStoredUser();
 
-    if (!storedUser) {
-      const freshUser = await fetchCurrentUser();
+      if (!nextUser) {
+        nextUser = await fetchCurrentUser();
+      }
 
-      if (!freshUser) {
-        setUser(null);
+      setUser(nextUser);
+
+      if (!nextUser?.email) {
         setOrders([]);
-        setLoading(false);
-        setRefreshing(false);
         return;
       }
 
-      setUser(freshUser);
-
-      try {
-        const data = await getAppOrders({
-          email: freshUser.email,
-          phone: freshUser.phone,
-          limit: 50,
-        });
-
-        setOrders(data);
-      } catch (error: any) {
-        console.log("ERROR LOAD ORDERS:", error);
-      }
-
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-
-    setUser(storedUser);
-
-    fetchCurrentUser().then((freshUser) => {
-      if (freshUser) setUser(freshUser);
-    });
-
-    try {
       const data = await getAppOrders({
-        email: storedUser.email,
-        phone: storedUser.phone,
-        limit: 50,
+        email: nextUser.email,
+        phone: nextUser.phone,
+        limit: 80,
       });
 
-      setOrders(data);
-    } catch (error: any) {
-      console.log("ERROR LOAD ORDERS:", error);
+      setOrders(data || []);
+    } catch (err: any) {
+      setError(err?.message || "No pudimos cargar tus pedidos.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -533,29 +340,168 @@ export default function OrdersScreen() {
     await loadOrders({ silent: true });
   }
 
-  const activeOrders = useMemo(() => {
-    return orders.filter((order) => !isDelivered(order) && !isCancelled(order))
-      .length;
-  }, [orders]);
+  async function handlePay(order: AppOrder) {
+    const orderId = getOrderId(order);
+    if (!orderId || payingOrderId) return;
 
-  const filteredOrders = useMemo(() => {
-    if (tab === "all") return orders;
+    try {
+      setPayingOrderId(orderId);
+      const checkout = await createMercadoPagoCheckout({
+        orderId,
+        email: user?.email || order.buyer?.email,
+        phone: user?.phone || order.buyer?.phone,
+      });
 
-    if (tab === "delivered") {
-      return orders.filter((order) => isDelivered(order));
+      const url = checkout.init_point || checkout.sandbox_init_point;
+      if (!url) throw new Error("Mercado Pago no devolvió un link de pago.");
+
+      await Linking.openURL(url);
+    } catch (err: any) {
+      alert(err?.message || "No pudimos abrir el pago.");
+    } finally {
+      setPayingOrderId(null);
+    }
+  }
+
+  function renderTimeline(order: AppOrder) {
+    const current = getVisualStep(order);
+    const currentIndex = getStepIndex(current);
+
+    if (current === "pending_payment") {
+      return (
+        <View style={styles.pendingTimeline}>
+          <Feather name="credit-card" size={17} color={orange} />
+          <Text style={styles.pendingTimelineText}>Pendiente de pago para iniciar la compra</Text>
+        </View>
+      );
     }
 
-    return orders.filter((order) => !isDelivered(order) && !isCancelled(order));
-  }, [orders, tab]);
+    if (current === "cancelled") {
+      return (
+        <View style={styles.cancelledTimeline}>
+          <Feather name="x-circle" size={17} color={red} />
+          <Text style={styles.cancelledTimelineText}>Pedido cancelado</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.timelineRow}>
+        {timelineSteps.map((step, index) => {
+          const done = index <= currentIndex;
+          const active = step.key === current;
+
+          return (
+            <View key={step.key} style={styles.timelineStep}>
+              <View style={[styles.timelineDot, done && styles.timelineDotDone, active && styles.timelineDotActive]}>
+                {done ? <Feather name="check" size={10} color={white} /> : null}
+              </View>
+              <Text style={[styles.timelineLabel, done && styles.timelineLabelDone]} numberOfLines={1}>
+                {step.label}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
+  function renderOrderCard(order: AppOrder) {
+    const id = getOrderId(order);
+    const meta = getStatusMeta(order);
+    const items = Array.isArray(order.items) ? order.items : [];
+    const firstItem = items[0];
+    const image = getItemImage(firstItem);
+    const totalARS = formatARS(order.totalARS);
+    const totalUSD = Number(order.totalUSD || 0);
+    const count = getItemsCount(order);
+
+    return (
+      <TouchableOpacity
+        key={id}
+        style={styles.orderCard}
+        activeOpacity={0.9}
+        onPress={() => router.push({ pathname: "/order/[id]", params: { id } })}
+      >
+        <View style={styles.orderTopRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.orderEyebrow}>ORDEN SHOPX</Text>
+            <Text style={styles.orderNumber}>#{order.orderNumber || id}</Text>
+            <Text style={styles.orderDate}>{formatDate(order.createdAt)}</Text>
+          </View>
+
+          <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
+            <Feather name={meta.icon as any} size={14} color={meta.color} />
+            <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
+          </View>
+        </View>
+
+        <View style={styles.orderBodyRow}>
+          <View style={styles.productPreview}>
+            {image ? (
+              <Image source={{ uri: image }} style={styles.productImage} resizeMode="contain" />
+            ) : (
+              <MaterialCommunityIcons name="package-variant-closed" size={36} color={navy} />
+            )}
+          </View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.productTitle} numberOfLines={2}>
+              {firstItem?.title || `${count} producto${count === 1 ? "" : "s"}`}
+            </Text>
+            <Text style={styles.productSubtitle} numberOfLines={1}>
+              {count} producto{count === 1 ? "" : "s"} · {getNextStepText(order)}
+            </Text>
+
+            <View style={styles.amountRow}>
+              <Text style={styles.totalUSD}>{formatUSD(totalUSD)}</Text>
+              {totalARS ? <Text style={styles.totalARS}>{totalARS}</Text> : null}
+            </View>
+          </View>
+        </View>
+
+        {renderTimeline(order)}
+
+        <View style={styles.cardActionsRow}>
+          {isPendingPayment(order) ? (
+            <TouchableOpacity
+              style={styles.payButton}
+              activeOpacity={0.9}
+              onPress={() => handlePay(order)}
+              disabled={payingOrderId === id}
+            >
+              {payingOrderId === id ? (
+                <ActivityIndicator color={white} />
+              ) : (
+                <>
+                  <Feather name="credit-card" size={17} color={white} />
+                  <Text style={styles.payButtonText}>Pagar ahora</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.nextStepBox}>
+              <Feather name="info" size={15} color={navy} />
+              <Text style={styles.nextStepText} numberOfLines={2}>{getNextStepText(order)}</Text>
+            </View>
+          )}
+
+          <View style={styles.openButton}>
+            <Text style={styles.openButtonText}>Ver detalle</Text>
+            <Feather name="arrow-right" size={16} color={accent} />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   if (loading) {
     return (
       <View style={styles.app}>
         <View style={styles.loadingScreen}>
           <ActivityIndicator color={navy} />
-          <Text style={styles.loadingText}>Cargando pedidos...</Text>
+          <Text style={styles.loadingText}>Cargando tus pedidos...</Text>
         </View>
-
         <AppBottomNav />
       </View>
     );
@@ -567,243 +513,93 @@ export default function OrdersScreen() {
         style={styles.screen}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={navy} />}
       >
-        <ScreenHeader
-          title="Mis pedidos"
-          subtitle="Seguimiento claro de tus compras desde USA hasta tu casa."
-        />
+        <ScreenHeader title="Mis pedidos" subtitle="Seguimiento real de tus compras ShopX." />
+
+        <View style={styles.heroCard}>
+          <View style={styles.heroIcon}>
+            <MaterialCommunityIcons name="package-variant-closed" size={28} color={white} />
+          </View>
+          <Text style={styles.heroEyebrow}>SHOPX TRACKING</Text>
+          <Text style={styles.heroTitle}>Tus compras, claras de punta a punta.</Text>
+          <Text style={styles.heroText}>
+            Vemos el estado de cada pedido, el próximo paso y el historial de entrega.
+          </Text>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{activeCount}</Text>
+              <Text style={styles.statLabel}>En curso</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{deliveredCount}</Text>
+              <Text style={styles.statLabel}>Entregados</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{orders.length}</Text>
+              <Text style={styles.statLabel}>Totales</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.tabsRow}>
+          {[
+            { key: "active", label: "En curso", count: activeCount },
+            { key: "delivered", label: "Entregados", count: deliveredCount },
+            { key: "all", label: "Todos", count: orders.length },
+          ].map((tab) => {
+            const active = filter === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.filterTab, active && styles.filterTabActive]}
+                activeOpacity={0.9}
+                onPress={() => setFilter(tab.key as FilterKey)}
+              >
+                <Text style={[styles.filterText, active && styles.filterTextActive]}>{tab.label}</Text>
+                <View style={[styles.filterCount, active && styles.filterCountActive]}>
+                  <Text style={[styles.filterCountText, active && styles.filterCountTextActive]}>{tab.count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {error ? (
+          <View style={styles.errorCard}>
+            <Feather name="alert-circle" size={22} color={red} />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => loadOrders()}>
+              <Text style={styles.retryText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {!user ? (
-          <>
-            <View style={styles.loginCard}>
-              <View style={styles.loginIcon}>
-                <Feather name="lock" size={25} color={navy} />
-              </View>
-
-              <Text style={styles.loginTitle}>
-                Iniciá sesión para ver tus pedidos
-              </Text>
-
-              <Text style={styles.loginText}>
-                Tus compras quedan asociadas a tu cuenta ShopX y se sincronizan
-                entre la app, la web y el panel administrativo.
-              </Text>
-
-              <TouchableOpacity
-                style={styles.loginButton}
-                activeOpacity={0.9}
-                onPress={() => router.push("/profile")}
-              >
-                <Text style={styles.loginButtonText}>Ir a mi cuenta</Text>
-                <Feather name="arrow-right" size={18} color={white} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.helpBanner}>
-              <View style={styles.helpIcon}>
-                <Feather name="message-circle" size={25} color={white} />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.helpTitle}>¿Tenés una duda?</Text>
-                <Text style={styles.helpText}>
-                  Hablá con una persona real de ShopX.
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.helpButton}
-                onPress={() => Linking.openURL("https://wa.me/5491150000000")}
-              >
-                <Text style={styles.helpButtonText}>Abrir</Text>
-              </TouchableOpacity>
-            </View>
-          </>
+          <View style={styles.emptyCard}>
+            <MaterialCommunityIcons name="account-lock-outline" size={38} color={navy} />
+            <Text style={styles.emptyTitle}>Ingresá a tu cuenta</Text>
+            <Text style={styles.emptyText}>Necesitás iniciar sesión para ver tus pedidos asociados.</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => router.push("/profile")}>
+              <Text style={styles.primaryButtonText}>Ir a mi cuenta</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filteredOrders.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <MaterialCommunityIcons name="package-variant" size={40} color={navy} />
+            <Text style={styles.emptyTitle}>
+              {filter === "active" ? "No tenés pedidos en curso" : filter === "delivered" ? "No tenés pedidos entregados" : "Todavía no tenés pedidos"}
+            </Text>
+            <Text style={styles.emptyText}>
+              Cuando compres con ShopX, vas a ver acá el estado completo de tu orden.
+            </Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => router.push("/")}>
+              <Text style={styles.primaryButtonText}>Ver productos</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <>
-            <View style={styles.headerContent}>
-              <View style={styles.summaryCard}>
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryNumber}>{activeOrders}</Text>
-                  <Text style={styles.summaryLabel}>Activos</Text>
-                </View>
-
-                <View style={styles.summaryDivider} />
-
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryNumber}>5–10</Text>
-                  <Text style={styles.summaryLabel}>Días hábiles</Text>
-                </View>
-
-                <View style={styles.summaryDivider} />
-
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryNumber}>100%</Text>
-                  <Text style={styles.summaryLabel}>Tracking</Text>
-                </View>
-              </View>
-
-              <View style={styles.trustCard}>
-                <View style={styles.trustIcon}>
-                  <MaterialCommunityIcons
-                    name="shield-check-outline"
-                    size={23}
-                    color={navy}
-                  />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.trustTitle}>Compra protegida ShopX</Text>
-                  <Text style={styles.trustText}>
-                    Si necesitás ayuda con un pedido, te acompañamos por
-                    WhatsApp.
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.tabsRow}>
-              <TouchableOpacity
-                style={[
-                  styles.tabPill,
-                  tab === "active" && styles.tabPillActive,
-                ]}
-                onPress={() => setTab("active")}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    tab === "active" && styles.tabTextActive,
-                  ]}
-                >
-                  En curso
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.tabPill,
-                  tab === "delivered" && styles.tabPillActive,
-                ]}
-                onPress={() => setTab("delivered")}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    tab === "delivered" && styles.tabTextActive,
-                  ]}
-                >
-                  Entregados
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.tabPill,
-                  tab === "all" && styles.tabPillActive,
-                ]}
-                onPress={() => setTab("all")}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    tab === "all" && styles.tabTextActive,
-                  ]}
-                >
-                  Todos
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>
-                  {tab === "active"
-                    ? "Pedidos en curso"
-                    : tab === "delivered"
-                    ? "Pedidos entregados"
-                    : "Todos tus pedidos"}
-                </Text>
-
-                <Text style={styles.sectionSubtitle}>
-                  {filteredOrders.length} pedido
-                  {filteredOrders.length === 1 ? "" : "s"} con seguimiento real
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.filterButton}
-                onPress={handleRefresh}
-              >
-                <Feather name="refresh-cw" size={16} color={text} />
-              </TouchableOpacity>
-            </View>
-
-            {filteredOrders.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <View style={styles.emptyIcon}>
-                  <MaterialCommunityIcons
-                    name="package-variant-closed"
-                    size={34}
-                    color={navy}
-                  />
-                </View>
-
-                <Text style={styles.emptyTitle}>
-                  {orders.length === 0
-                    ? "Todavía no tenés pedidos"
-                    : "No hay pedidos en esta sección"}
-                </Text>
-
-                <Text style={styles.emptyText}>
-                  {orders.length === 0
-                    ? "Cuando compres desde la app o la web, tus pedidos van a aparecer acá automáticamente."
-                    : "Probá cambiando de pestaña para ver otros estados."}
-                </Text>
-
-                <TouchableOpacity
-                  style={styles.loginButton}
-                  activeOpacity={0.9}
-                  onPress={() => router.push("/")}
-                >
-                  <Text style={styles.loginButtonText}>Ver productos</Text>
-                  <Feather name="arrow-right" size={18} color={white} />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.ordersList}>
-                {filteredOrders.map((order) => (
-                  <OrderCard
-                    key={order._id || order.orderNumber}
-                    order={order}
-                  />
-                ))}
-              </View>
-            )}
-
-            <View style={styles.helpBanner}>
-              <View style={styles.helpIcon}>
-                <Feather name="message-circle" size={25} color={white} />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.helpTitle}>¿Tenés una duda?</Text>
-                <Text style={styles.helpText}>
-                  Hablá con una persona real de ShopX.
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.helpButton}
-                onPress={() => Linking.openURL("https://wa.me/5491150000000")}
-              >
-                <Text style={styles.helpButtonText}>Abrir</Text>
-              </TouchableOpacity>
-            </View>
-          </>
+          <View style={styles.ordersList}>{filteredOrders.map(renderOrderCard)}</View>
         )}
 
         <View style={{ height: 130 }} />
@@ -815,480 +611,80 @@ export default function OrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  app: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-  content: {
-    paddingBottom: 0,
-  },
-
-  loadingScreen: {
-    flex: 1,
-    backgroundColor: soft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingText: {
-    marginTop: 10,
-    color: muted,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
-  headerContent: {
-    paddingHorizontal: 18,
-    paddingBottom: 8,
-  },
-
-  summaryCard: {
-    marginTop: 6,
-    height: 86,
-    borderRadius: 28,
+  app: { flex: 1, backgroundColor: soft },
+  screen: { flex: 1 },
+  content: { paddingHorizontal: 18, paddingTop: 18 },
+  loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
+  loadingText: { color: muted, fontWeight: "800" },
+  heroCard: {
+    borderRadius: 32,
     backgroundColor: navy,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
+    padding: 24,
+    marginTop: 12,
     shadowColor: navy,
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
     elevation: 5,
   },
-  summaryItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-  summaryNumber: {
-    color: white,
-    fontSize: 27,
-    fontWeight: "900",
-    letterSpacing: -0.6,
-  },
-  summaryLabel: {
-    marginTop: 4,
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  summaryDivider: {
-    width: 1,
-    height: 48,
-    backgroundColor: "rgba(255,255,255,0.18)",
-  },
-
-  trustCard: {
-    marginTop: 14,
-    borderRadius: 22,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 2,
-  },
-  trustIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  trustTitle: {
-    color: text,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  trustText: {
-    marginTop: 3,
-    color: muted,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "600",
-  },
-
-  tabsRow: {
-    paddingHorizontal: 18,
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 10,
-  },
-  tabPill: {
-    height: 40,
-    paddingHorizontal: 18,
-    borderRadius: 999,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabPillActive: {
-    backgroundColor: navy,
-    borderColor: navy,
-  },
-  tabText: {
-    color: muted,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  tabTextActive: {
-    color: white,
-  },
-
-  sectionHeader: {
-    paddingHorizontal: 18,
-    marginTop: 24,
-    marginBottom: 14,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-  sectionTitle: {
-    color: text,
-    fontSize: 25,
-    fontWeight: "900",
-    letterSpacing: -0.6,
-  },
-  sectionSubtitle: {
-    marginTop: 3,
-    color: muted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  filterButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 16,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  ordersList: {
-    paddingHorizontal: 18,
-    gap: 14,
-  },
-  orderCard: {
-    borderRadius: 28,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 18,
-    shadowColor: navy,
-    shadowOpacity: 0.055,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
-  },
-  orderTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  orderInfo: {
-    flex: 1,
-    paddingRight: 0,
-  },
-  orderId: {
-    color: "#9AA6B8",
-    fontSize: 13,
-    fontWeight: "900",
-    letterSpacing: 2,
-  },
-  orderTitle: {
-    marginTop: 5,
-    color: text,
-    fontSize: 22,
-    fontWeight: "900",
-    letterSpacing: -0.5,
-  },
-  orderBrand: {
-    marginTop: 5,
-    color: "#667995",
-    fontSize: 13,
-    fontWeight: "900",
-    letterSpacing: 0.4,
-  },
-
-  statusBox: {
-    marginTop: 18,
-    borderRadius: 22,
-    backgroundColor: softCard,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  statusTitle: {
-    color: text,
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  statusText: {
-    marginTop: 5,
-    color: muted,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-
-  priceBlock: {
-    flex: 0.9,
-    alignItems: "flex-end",
-  },
-  priceARS: {
-    color: navy,
-    fontSize: 19,
-    lineHeight: 24,
-    fontWeight: "900",
-    textAlign: "right",
-  },
-  priceUSD: {
-    marginTop: 3,
-    color: "#667995",
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "900",
-    textAlign: "right",
-  },
-  exchangeLabel: {
-    marginTop: 3,
-    color: "#9AA6B8",
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: "800",
-    textAlign: "right",
-  },
-
-  progressWrap: {
-    marginTop: 22,
-    flexDirection: "row",
-  },
-  stepBlock: {
-    flex: 1,
-  },
-  stepTop: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  stepCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: white,
-    borderWidth: 2,
-    borderColor: border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepCircleDone: {
-    backgroundColor: accent,
-    borderColor: accent,
-  },
-  stepLineWrap: {
-    flex: 1,
-    height: 3,
-    backgroundColor: border,
-  },
-  stepLine: {
-    height: 3,
-    backgroundColor: border,
-  },
-  stepLineDone: {
-    backgroundColor: accent,
-  },
-  stepLabel: {
-    marginTop: 7,
-    color: "#A0ABBC",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  stepLabelDone: {
-    color: text,
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: border,
-    marginTop: 14,
-    marginBottom: 10,
-  },
-  updateLabel: {
-    color: "#9AA6B8",
-    fontSize: 9,
-    lineHeight: 11,
-    fontWeight: "900",
-    letterSpacing: 1.2,
-  },
-  updateText: {
-    marginTop: 2,
-    color: muted,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "700",
-  },
-
-  primaryButtonFull: {
-    marginTop: 18,
-    height: 48,
-    borderRadius: 999,
-    backgroundColor: navy,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryButtonText: {
-    color: white,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-
-  helpBanner: {
-    marginHorizontal: 18,
-    marginTop: 18,
-    borderRadius: 24,
-    backgroundColor: navyDark,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  helpIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  helpTitle: {
-    color: white,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  helpText: {
-    marginTop: 3,
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  helpButton: {
-    height: 40,
-    paddingHorizontal: 18,
-    borderRadius: 999,
-    backgroundColor: white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  helpButtonText: {
-    color: text,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-
-  loginCard: {
-    marginHorizontal: 18,
-    borderRadius: 30,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 24,
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.05,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
-  },
-  loginIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 26,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  loginTitle: {
-    color: text,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  loginText: {
-    marginTop: 8,
-    color: muted,
-    fontSize: 14,
-    lineHeight: 22,
-    fontWeight: "600",
-    textAlign: "center",
-  },
-  loginButton: {
-    marginTop: 20,
-    minHeight: 52,
-    borderRadius: 999,
-    backgroundColor: navy,
-    paddingHorizontal: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  loginButtonText: {
-    color: white,
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  emptyCard: {
-    marginHorizontal: 18,
-    borderRadius: 30,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 24,
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.05,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
-  },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 28,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    color: text,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  emptyText: {
-    marginTop: 8,
-    color: muted,
-    fontSize: 14,
-    lineHeight: 22,
-    fontWeight: "600",
-    textAlign: "center",
-  },
+  heroIcon: { width: 58, height: 58, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.13)", alignItems: "center", justifyContent: "center", marginBottom: 16 },
+  heroEyebrow: { color: accent, fontSize: 12, fontWeight: "900", letterSpacing: 3 },
+  heroTitle: { color: white, fontSize: 28, lineHeight: 32, fontWeight: "900", marginTop: 8 },
+  heroText: { color: "rgba(255,255,255,0.78)", fontSize: 15, lineHeight: 22, fontWeight: "700", marginTop: 10 },
+  statsRow: { flexDirection: "row", gap: 10, marginTop: 20 },
+  statCard: { flex: 1, backgroundColor: "rgba(255,255,255,0.11)", borderRadius: 20, paddingVertical: 14, alignItems: "center" },
+  statValue: { color: white, fontSize: 24, fontWeight: "900" },
+  statLabel: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: "800", marginTop: 2 },
+  tabsRow: { flexDirection: "row", gap: 8, marginTop: 18, marginBottom: 12 },
+  filterTab: { flex: 1, minHeight: 48, borderRadius: 18, borderWidth: 1, borderColor: border, backgroundColor: white, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 },
+  filterTabActive: { backgroundColor: navy, borderColor: navy },
+  filterText: { color: muted, fontSize: 13, fontWeight: "900" },
+  filterTextActive: { color: white },
+  filterCount: { minWidth: 22, height: 22, borderRadius: 11, backgroundColor: softCard, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
+  filterCountActive: { backgroundColor: accent },
+  filterCountText: { color: navy, fontSize: 11, fontWeight: "900" },
+  filterCountTextActive: { color: navyDark },
+  ordersList: { gap: 14 },
+  orderCard: { backgroundColor: white, borderRadius: 30, padding: 18, borderWidth: 1, borderColor: border, shadowColor: navy, shadowOpacity: 0.055, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 2 },
+  orderTopRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  orderEyebrow: { color: "#A0AEC0", fontSize: 11, fontWeight: "900", letterSpacing: 3 },
+  orderNumber: { color: text, fontSize: 22, fontWeight: "900", marginTop: 3 },
+  orderDate: { color: muted, fontSize: 13, fontWeight: "700", marginTop: 2 },
+  statusPill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, maxWidth: 170 },
+  statusText: { fontSize: 12, fontWeight: "900" },
+  orderBodyRow: { flexDirection: "row", gap: 14, marginTop: 18, alignItems: "center" },
+  productPreview: { width: 82, height: 82, borderRadius: 22, backgroundColor: softCard, borderWidth: 1, borderColor: "#EDF2F7", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  productImage: { width: "92%", height: "92%" },
+  productTitle: { color: text, fontSize: 16, lineHeight: 21, fontWeight: "900" },
+  productSubtitle: { color: muted, fontSize: 12, lineHeight: 17, fontWeight: "700", marginTop: 4 },
+  amountRow: { flexDirection: "row", alignItems: "baseline", gap: 9, marginTop: 9, flexWrap: "wrap" },
+  totalUSD: { color: navy, fontSize: 19, fontWeight: "900" },
+  totalARS: { color: muted, fontSize: 12, fontWeight: "800" },
+  timelineRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: border },
+  timelineStep: { alignItems: "center", flex: 1, gap: 5 },
+  timelineDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#E6EDF5", alignItems: "center", justifyContent: "center" },
+  timelineDotDone: { backgroundColor: navy },
+  timelineDotActive: { borderWidth: 3, borderColor: "#BDEFF5" },
+  timelineLabel: { color: "#A0AEC0", fontSize: 9, fontWeight: "800" },
+  timelineLabelDone: { color: navy },
+  pendingTimeline: { marginTop: 16, borderTopWidth: 1, borderTopColor: border, paddingTop: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+  pendingTimelineText: { color: orange, fontSize: 13, fontWeight: "800" },
+  cancelledTimeline: { marginTop: 16, borderTopWidth: 1, borderTopColor: border, paddingTop: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+  cancelledTimelineText: { color: red, fontSize: 13, fontWeight: "800" },
+  cardActionsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 17 },
+  payButton: { minHeight: 48, borderRadius: 17, backgroundColor: navy, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  payButtonText: { color: white, fontSize: 14, fontWeight: "900" },
+  nextStepBox: { flex: 1, minHeight: 48, borderRadius: 17, backgroundColor: softCard, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
+  nextStepText: { flex: 1, color: muted, fontSize: 12, lineHeight: 16, fontWeight: "800" },
+  openButton: { minHeight: 48, borderRadius: 17, backgroundColor: "#EAFBFD", paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  openButtonText: { color: accent, fontSize: 13, fontWeight: "900" },
+  emptyCard: { backgroundColor: white, borderRadius: 30, padding: 26, alignItems: "center", borderWidth: 1, borderColor: border, marginTop: 8 },
+  emptyTitle: { color: text, fontSize: 22, fontWeight: "900", marginTop: 14, textAlign: "center" },
+  emptyText: { color: muted, fontSize: 14, lineHeight: 21, fontWeight: "700", textAlign: "center", marginTop: 8 },
+  primaryButton: { marginTop: 18, minHeight: 52, borderRadius: 18, backgroundColor: navy, paddingHorizontal: 22, alignItems: "center", justifyContent: "center" },
+  primaryButtonText: { color: white, fontSize: 15, fontWeight: "900" },
+  errorCard: { backgroundColor: redSoft, borderRadius: 22, padding: 16, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#FECACA", marginBottom: 12 },
+  errorText: { flex: 1, color: red, fontSize: 13, fontWeight: "800" },
+  retryButton: { borderRadius: 999, backgroundColor: white, paddingHorizontal: 12, paddingVertical: 8 },
+  retryText: { color: red, fontSize: 12, fontWeight: "900" },
 });

@@ -14,6 +14,7 @@ import {
   ShopXProduct,
 } from "../lib/api";
 import { addProductToCart } from "../lib/cart-store";
+import { useFavoriteProduct } from "../hooks/useFavorites";
 
 const navy = "#062B4F";
 const text = "#071E35";
@@ -68,6 +69,9 @@ export function ProductCard({
   const imageUrl = getProductImage(product);
   const price = getDisplayFinalPriceUSD(product);
 
+  const { isFavorite, updatingFavorite, toggleFavorite } =
+    useFavoriteProduct(product);
+
   const isGrid = variant === "grid";
   const isCompact = variant === "compact";
 
@@ -89,6 +93,19 @@ export function ProductCard({
     }
   }
 
+  async function handleToggleFavorite() {
+    try {
+      await toggleFavorite();
+    } catch (error) {
+      console.log("ERROR FAVORITE FROM CARD:", error);
+
+      Alert.alert(
+        "No pudimos guardar el favorito",
+        "Hubo un problema al actualizar tus favoritos. Probá de nuevo."
+      );
+    }
+  }
+
   return (
     <TouchableOpacity
       style={[
@@ -99,8 +116,23 @@ export function ProductCard({
       activeOpacity={0.9}
       onPress={onPress}
     >
-      <TouchableOpacity style={styles.favoriteButton} activeOpacity={0.85}>
-        <Feather name="heart" size={isCompact ? 17 : 19} color={muted} />
+      <TouchableOpacity
+        style={[
+          styles.favoriteButton,
+          isFavorite && styles.favoriteButtonActive,
+        ]}
+        activeOpacity={0.85}
+        disabled={updatingFavorite}
+        onPress={(event) => {
+          event.stopPropagation();
+          handleToggleFavorite();
+        }}
+      >
+        <Feather
+          name="heart"
+          size={isCompact ? 17 : 19}
+          color={isFavorite ? white : muted}
+        />
       </TouchableOpacity>
 
       <View
@@ -218,6 +250,15 @@ const styles = StyleSheet.create({
     backgroundColor: white,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  favoriteButtonActive: {
+    backgroundColor: accent,
+    shadowColor: accent,
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
 
   imageWrap: {

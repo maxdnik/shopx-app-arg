@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,8 @@ import {
 } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { formatUSD } from "../../lib/api";
+import { buildApiUrl } from "../../lib/config";
+import { AppBottomNav } from "../../components/AppBottomNav";
 import { fetchCurrentUser, getStoredUser, ShopXUser } from "../../lib/auth";
 import {
   AppOrder,
@@ -53,7 +56,10 @@ const steps: { key: OrderStatus; label: string; icon: string }[] = [
 ];
 
 function normalizeStep(step?: string): OrderStatus | null {
-  const clean = String(step || "").toLowerCase();
+  const clean = String(step || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
   if (clean === "pending_payment") return "pending_payment";
   if (clean === "purchased" || clean === "paid") return "purchased";
@@ -67,14 +73,18 @@ function normalizeStep(step?: string): OrderStatus | null {
     return "miami";
   }
 
-  if (clean === "traveling" || clean === "in_transit" || clean === "shipped") {
+  if (clean === "traveling" || clean === "in_transit") {
     return "traveling";
   }
 
   if (
+    clean === "shipped" ||
     clean === "argentina" ||
     clean === "customs" ||
-    clean === "local_delivery"
+    clean === "local_delivery" ||
+    clean === "despachado" ||
+    clean === "enviado" ||
+    clean === "enviado correo local"
   ) {
     return "argentina";
   }
@@ -125,6 +135,15 @@ function isPendingPayment(order: AppOrder) {
 }
 
 function getVisualStatus(order: AppOrder): OrderStatus {
+  const status = String(order.status || "").toLowerCase();
+  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
+
+  if (status === "delivered") return "delivered";
+
+  if (status === "shipped") {
+    return "argentina";
+  }
+
   const trackingStep = normalizeStep(order.tracking?.currentStep);
 
   if (
@@ -135,11 +154,6 @@ function getVisualStatus(order: AppOrder): OrderStatus {
     return trackingStep;
   }
 
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  if (status === "delivered") return "delivered";
-
   if (
     status === "argentina" ||
     status === "customs" ||
@@ -148,11 +162,7 @@ function getVisualStatus(order: AppOrder): OrderStatus {
     return "argentina";
   }
 
-  if (
-    status === "in_transit" ||
-    status === "traveling" ||
-    status === "shipped"
-  ) {
+  if (status === "in_transit" || status === "traveling") {
     return "traveling";
   }
 
@@ -176,12 +186,16 @@ function getVisualStatus(order: AppOrder): OrderStatus {
 }
 
 function getStatusLabel(order: AppOrder) {
+  const status = String(order.status || "").toLowerCase();
+  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
+
+  if (status === "shipped") {
+    return "En Argentina";
+  }
+
   if (order.tracking?.currentLabel) {
     return order.tracking.currentLabel;
   }
-
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
 
   if (isCancelled(order)) return "Cancelado";
   if (isDelivered(order)) return "Entregado";
@@ -200,11 +214,7 @@ function getStatusLabel(order: AppOrder) {
     return "Recibido en Miami";
   }
 
-  if (
-    status === "in_transit" ||
-    status === "traveling" ||
-    status === "shipped"
-  ) {
+  if (status === "in_transit" || status === "traveling") {
     return "En viaje a Argentina";
   }
 
@@ -218,6 +228,12 @@ function getStatusLabel(order: AppOrder) {
 }
 
 function getStatusDescription(order: AppOrder) {
+  const status = String(order.status || "").toLowerCase();
+
+  if (status === "shipped") {
+    return "El pedido ya está en Argentina y se encuentra en proceso de distribución. Próximamente será entregado.";
+  }
+
   if (order.tracking?.currentDescription) {
     return order.tracking.currentDescription;
   }
@@ -229,8 +245,6 @@ function getStatusDescription(order: AppOrder) {
     return "Tu pedido está pendiente de pago con Mercado Pago.";
   }
 
-  const status = String(order.status || "").toLowerCase();
-
   if (
     status === "in_miami_warehouse" ||
     status === "miami" ||
@@ -239,11 +253,7 @@ function getStatusDescription(order: AppOrder) {
     return "El producto fue recibido en Miami y está siendo preparado para consolidación.";
   }
 
-  if (
-    status === "in_transit" ||
-    status === "traveling" ||
-    status === "shipped"
-  ) {
+  if (status === "in_transit" || status === "traveling") {
     return "Tu compra está viajando hacia Argentina.";
   }
 
@@ -394,6 +404,118 @@ function getBuyerName(order: AppOrder, user: ShopXUser | null) {
     user?.email ||
     "Cliente ShopX"
   );
+}
+
+function toAbsoluteImageUrl(url?: string | null) {
+  const clean = String(url || "").trim();
+
+  if (!clean) return null;
+
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return clean;
+  }
+
+  return buildApiUrl(clean);
+}
+
+function getOrderItemImage(item: any) {
+  const raw =
+    item?.imageUrl ||
+    item?.image ||
+    item?.thumbnail ||
+    item?.product?.imageUrl ||
+    item?.product?.image ||
+    item?.product?.images?.[0] ||
+    item?.product?.imageUrls?.[0] ||
+    item?.images?.[0] ||
+    item?.imageUrls?.[0] ||
+    null;
+
+  return toAbsoluteImageUrl(raw);
+}
+
+function getItemBrand(item: any) {
+  return String(item?.brand || item?.store || item?.product?.brand || "ShopX")
+    .trim()
+    .toUpperCase();
+}
+
+function getNextStepContent(order: AppOrder) {
+  const visualStatus = getVisualStatus(order);
+
+  if (isCancelled(order)) {
+    return {
+      icon: "alert-circle-outline",
+      title: "Pedido cancelado",
+      text: "Este pedido figura cancelado. Si creés que es un error, podés consultar con soporte.",
+    };
+  }
+
+  if (isPendingPayment(order)) {
+    return {
+      icon: "credit-card-outline",
+      title: "Próximo paso: completar el pago",
+      text: "Apenas se confirme el pago, ShopX avanza con la gestión de compra y seguimiento.",
+    };
+  }
+
+  if (visualStatus === "purchased") {
+    return {
+      icon: "shopping-outline",
+      title: "Próximo paso: recepción en Miami",
+      text: "Estamos gestionando la compra en USA. Te avisamos cuando llegue a nuestro depósito en Miami.",
+    };
+  }
+
+  if (visualStatus === "miami") {
+    return {
+      icon: "warehouse",
+      title: "Próximo paso: salida a Argentina",
+      text: "Tu producto está en Miami. Estamos preparando la consolidación y el envío internacional.",
+    };
+  }
+
+  if (visualStatus === "traveling") {
+    return {
+      icon: "airplane",
+      title: "Próximo paso: ingreso a Argentina",
+      text: "Tu pedido está viajando. Te vamos a avisar cuando entre al circuito local.",
+    };
+  }
+
+  if (visualStatus === "argentina") {
+    return {
+      icon: "truck-delivery-outline",
+      title: "Próximo paso: entrega local",
+      text: "Tu pedido ya está en Argentina y avanza hacia la entrega puerta a puerta.",
+    };
+  }
+
+  if (visualStatus === "delivered") {
+    return {
+      icon: "check-decagram-outline",
+      title: "Pedido entregado",
+      text: "Tu compra fue entregada. Gracias por confiar en ShopX.",
+    };
+  }
+
+  return {
+    icon: "progress-clock",
+    title: "Seguimiento activo",
+    text: "ShopX está actualizando el estado del pedido hasta la entrega.",
+  };
+}
+
+function getPrimaryAction(order: AppOrder) {
+  if (isPendingPayment(order)) {
+    return "Pagar ahora";
+  }
+
+  if (isDelivered(order)) {
+    return "Ver productos";
+  }
+
+  return "Actualizar pedido";
 }
 
 function OrderProgress({ status }: { status: OrderStatus }) {
@@ -674,6 +796,7 @@ export default function OrderDetailScreen() {
     ? order.tracking.history
     : [];
   const totalARS = getOrderTotalARS(order);
+  const nextStep = getNextStepContent(order);
 
   return (
     <View style={styles.app}>
@@ -836,6 +959,44 @@ export default function OrderDetailScreen() {
           <OrderProgress status={visualStatus} />
         </View>
 
+        <View style={styles.nextStepCard}>
+          <View style={styles.nextStepIcon}>
+            <MaterialCommunityIcons
+              name={nextStep.icon as any}
+              size={27}
+              color={navy}
+            />
+          </View>
+
+          <View style={styles.nextStepContent}>
+            <Text style={styles.nextStepTitle}>{nextStep.title}</Text>
+            <Text style={styles.nextStepText}>{nextStep.text}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.nextStepButton}
+            activeOpacity={0.88}
+            onPress={() => {
+              if (isPendingPayment(order)) {
+                handlePayPendingOrder();
+                return;
+              }
+
+              if (isDelivered(order)) {
+                router.push("/");
+                return;
+              }
+
+              loadOrder({ silent: true });
+            }}
+            disabled={checkoutLoading}
+          >
+            <Text style={styles.nextStepButtonText}>
+              {getPrimaryAction(order)}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {trackingHistory.length > 0 ? (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Historial de tracking</Text>
@@ -876,32 +1037,51 @@ export default function OrderDetailScreen() {
               const quantity = Number(item.qty || item.quantity || 1);
               const unitPriceUSD = getItemUnitPriceUSD(item);
               const lineTotalUSD = unitPriceUSD * quantity;
+              const imageUrl = getOrderItemImage(item);
 
               return (
                 <View
-                  key={`${item.productId || item.title}-${index}`}
+                  key={`${item.productId || item.slug || item.title}-${index}`}
                   style={styles.itemRow}
                 >
-                  <View style={styles.itemIcon}>
-                    <MaterialCommunityIcons
-                      name="package-variant-closed"
-                      size={22}
-                      color={navy}
-                    />
+                  <View style={styles.itemImageBox}>
+                    {imageUrl ? (
+                      <Image
+                        source={{ uri: imageUrl }}
+                        style={styles.itemImage}
+                      />
+                    ) : (
+                      <MaterialCommunityIcons
+                        name="package-variant-closed"
+                        size={26}
+                        color={navy}
+                      />
+                    )}
                   </View>
 
                   <View style={styles.itemInfo}>
+                    <Text style={styles.itemBrand}>{getItemBrand(item)}</Text>
                     <Text style={styles.itemTitle} numberOfLines={2}>
                       {item.title || "Producto ShopX"}
                     </Text>
 
-                    <Text style={styles.itemMeta}>Cantidad: {quantity}</Text>
+                    <View style={styles.itemMetaRow}>
+                      <Text style={styles.itemMeta}>Cantidad: {quantity}</Text>
+                      <Text style={styles.itemMeta}>Precio final</Text>
+                    </View>
                   </View>
 
                   <View style={styles.itemPriceBlock}>
                     <Text style={styles.itemPrice}>
-                      USD {formatUSD(lineTotalUSD)}
+                      {lineTotalUSD > 0
+                        ? `USD ${formatUSD(lineTotalUSD)}`
+                        : "Consultar"}
                     </Text>
+                    {quantity > 1 && unitPriceUSD > 0 ? (
+                      <Text style={styles.itemPriceUSD}>
+                        USD {formatUSD(unitPriceUSD)} c/u
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               );
@@ -1014,8 +1194,10 @@ export default function OrderDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={{ height: 80 }} />
+        <View style={{ height: 132 }} />
       </ScrollView>
+
+      <AppBottomNav />
     </View>
   );
 }
@@ -1276,6 +1458,61 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 
+  nextStepCard: {
+    marginHorizontal: 18,
+    marginTop: 14,
+    borderRadius: 28,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: border,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    shadowColor: navy,
+    shadowOpacity: 0.045,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  nextStepIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 20,
+    backgroundColor: "#EAFBFD",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nextStepContent: {
+    flex: 1,
+  },
+  nextStepTitle: {
+    color: text,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "900",
+  },
+  nextStepText: {
+    marginTop: 3,
+    color: muted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  nextStepButton: {
+    minHeight: 40,
+    borderRadius: 999,
+    backgroundColor: navy,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nextStepButtonText: {
+    color: white,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
   progressCard: {
     marginHorizontal: 18,
     marginTop: 14,
@@ -1421,13 +1658,35 @@ const styles = StyleSheet.create({
     borderColor: border,
     padding: 12,
   },
-  itemIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
+  itemImageBox: {
+    width: 66,
+    height: 66,
+    borderRadius: 20,
     backgroundColor: white,
+    borderWidth: 1,
+    borderColor: border,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
+  },
+  itemImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "contain",
+  },
+  itemBrand: {
+    color: "#9AA6B8",
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "900",
+    letterSpacing: 1.8,
+    marginBottom: 2,
+  },
+  itemMetaRow: {
+    marginTop: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   itemInfo: {
     flex: 1,

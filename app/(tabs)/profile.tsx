@@ -1,4 +1,4 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import * as AuthSession from "expo-auth-session";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -19,6 +19,8 @@ import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
+import { useFavorites } from "../../hooks/useFavorites";
+import { AppOrder, getAppOrders } from "../../lib/orders";
 import { GOOGLE_AUTH_CONFIG } from "../../lib/google-auth-config";
 import {
   CheckoutProfile,
@@ -31,6 +33,7 @@ import {
   registerApp,
   ShopXUser,
   updateAppAccount,
+  forgotPasswordApp,
 } from "../../lib/auth";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -108,24 +111,69 @@ function getMissingLabel(field: string) {
   return labels[field] || field;
 }
 
+
+function normalizeOrderStatus(order: AppOrder) {
+  const status = String(order.status || "").toLowerCase();
+  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
+  const trackingStep = String(order.tracking?.currentStep || "").toLowerCase();
+
+  if (trackingStep === "delivered" || status === "delivered") return "delivered";
+
+  if (
+    trackingStep === "cancelled" ||
+    trackingStep === "canceled" ||
+    status === "cancelled" ||
+    status === "canceled" ||
+    paymentStatus === "rejected" ||
+    paymentStatus === "cancelled"
+  ) {
+    return "cancelled";
+  }
+
+  return "active";
+}
+
+function getOrderStats(orders: AppOrder[]) {
+  return orders.reduce(
+    (acc, order) => {
+      const status = normalizeOrderStatus(order);
+
+      acc.total += 1;
+
+      if (status === "delivered") acc.delivered += 1;
+      if (status === "active") acc.active += 1;
+
+      return acc;
+    },
+    { total: 0, active: 0, delivered: 0 }
+  );
+}
+
 function StatCard({
   value,
   label,
   icon,
+  onPress,
 }: {
   value: string;
   label: string;
   icon: string;
+  onPress?: () => void;
 }) {
   return (
-    <View style={styles.statCard}>
+    <TouchableOpacity
+      style={styles.statCard}
+      activeOpacity={onPress ? 0.88 : 1}
+      onPress={onPress}
+      disabled={!onPress}
+    >
       <View style={styles.statIcon}>
         <MaterialCommunityIcons name={icon as any} size={20} color={navy} />
       </View>
 
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -152,10 +200,13 @@ function MenuRow({ item }: { item: MenuItem }) {
 
 export default function ProfileScreen() {
   const scrollRef = useRef<ScrollView | null>(null);
+  const { favoritesCount } = useFavorites();
 
   const [user, setUser] = useState<ShopXUser | null>(null);
   const [checkoutProfile, setCheckoutProfile] =
     useState<CheckoutProfile | null>(null);
+  const [profileOrders, setProfileOrders] = useState<AppOrder[]>([]);
+  const [loadingOrdersSummary, setLoadingOrdersSummary] = useState(false);
 
   const [loadingSession, setLoadingSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -229,8 +280,61 @@ export default function ProfileScreen() {
       setUser(account.user);
       setCheckoutProfile(account.checkoutProfile);
       hydrateForm(account.user);
+      await loadProfileOrders(account.user);
     } catch {
       // Login succeeded; account endpoint can be retried later.
+    }
+  }
+
+
+  async function loadProfileOrders(nextUser?: ShopXUser | null) {
+    const targetUser = nextUser || user;
+
+    if (!targetUser?.email) {
+      setProfileOrders([]);
+      return;
+    }
+
+    try {
+      setLoadingOrdersSummary(true);
+      const orders = await getAppOrders({
+        email: targetUser.email,
+        phone: targetUser.phone,
+        limit: 80,
+      });
+      setProfileOrders(orders || []);
+    } catch {
+      setProfileOrders([]);
+    } finally {
+      setLoadingOrdersSummary(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    const email = loginEmail.trim();
+
+    if (!email) {
+      Alert.alert(
+        "Ingresá tu email",
+        "Escribí el email de tu cuenta y después tocá ‘Olvidé mi contraseña’."
+      );
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await forgotPasswordApp(email);
+      Alert.alert(
+        "Revisá tu email",
+        "Si existe una cuenta ShopX con ese email, te enviamos un link para restablecer tu contraseña."
+      );
+    } catch (error: any) {
+      Alert.alert(
+        "No pudimos enviar el email",
+        error?.message || "Intentá nuevamente en unos minutos."
+      );
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -347,6 +451,15 @@ export default function ProfileScreen() {
 
   const menuItems: MenuItem[] = [
     {
+      title: "Favoritos",
+      subtitle:
+        favoritesCount === 1
+          ? "1 producto guardado"
+          : `${favoritesCount} productos guardados`,
+      icon: "heart-outline",
+      action: () => router.push("/favorites"),
+    },
+    {
       title: "Mis datos",
       subtitle: "Nombre, email y datos personales",
       icon: "account-outline",
@@ -392,10 +505,12 @@ export default function ProfileScreen() {
         setUser(account.user);
         setCheckoutProfile(account.checkoutProfile);
         hydrateForm(account.user);
+        await loadProfileOrders(account.user);
       } catch {
         const freshUser = await fetchCurrentUser();
         setUser(freshUser);
         hydrateForm(freshUser);
+        await loadProfileOrders(freshUser);
       }
 
       setLoadingSession(false);
@@ -413,12 +528,14 @@ export default function ProfileScreen() {
         setUser(account.user);
         setCheckoutProfile(account.checkoutProfile);
         hydrateForm(account.user);
+        await loadProfileOrders(account.user);
       } catch {
-        // session is valid but account endpoint failed
+        await loadProfileOrders(freshUser);
       }
     } else {
       setUser(null);
       setCheckoutProfile(null);
+      setProfileOrders([]);
     }
 
     setLoadingSession(false);
@@ -599,6 +716,7 @@ export default function ProfileScreen() {
 
           setUser(null);
           setCheckoutProfile(null);
+          setProfileOrders([]);
           setEditCheckoutData(false);
 
           setLoginEmail("");
@@ -622,6 +740,8 @@ export default function ProfileScreen() {
       },
     ]);
   }
+
+  const orderStats = getOrderStats(profileOrders);
 
   if (loadingSession) {
     return (
@@ -695,8 +815,24 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.statsRow}>
-              <StatCard value="0" label="Pedidos" icon="package-variant-closed" />
-              <StatCard value="100%" label="Tracking" icon="map-marker-path" />
+              <StatCard
+                value={loadingOrdersSummary ? "…" : String(orderStats.total)}
+                label={
+                  orderStats.active > 0
+                    ? `${orderStats.active} en curso`
+                    : orderStats.delivered > 0
+                    ? `${orderStats.delivered} entregado${orderStats.delivered === 1 ? "" : "s"}`
+                    : "Pedidos"
+                }
+                icon="package-variant-closed"
+                onPress={() => router.push("/orders")}
+              />
+              <StatCard
+                value={String(favoritesCount)}
+                label="Favoritos"
+                icon="heart-outline"
+                onPress={() => router.push("/favorites")}
+              />
               <StatCard value="24/7" label="Soporte" icon="whatsapp" />
             </View>
 
@@ -1134,6 +1270,15 @@ export default function ProfileScreen() {
                     style={styles.input}
                     secureTextEntry
                   />
+
+                  <TouchableOpacity
+                    style={styles.forgotPasswordButton}
+                    activeOpacity={0.85}
+                    onPress={handleForgotPassword}
+                    disabled={submitting || googleLoading}
+                  >
+                    <Text style={styles.forgotPasswordText}>Olvidé mi contraseña</Text>
+                  </TouchableOpacity>
 
                   <TouchableOpacity
                     style={[
@@ -1937,6 +2082,19 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 11,
   },
+  forgotPasswordButton: {
+    alignSelf: "flex-end",
+    marginTop: -2,
+    marginBottom: 14,
+    paddingVertical: 6,
+  },
+
+  forgotPasswordText: {
+    color: accent,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
   authSubmitButton: {
     marginTop: 4,
     height: 54,

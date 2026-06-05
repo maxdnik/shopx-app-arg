@@ -9,14 +9,54 @@ export type CartItem = {
   addedAt: string;
 };
 
+type CartListener = () => void;
+
+const cartListeners = new Set<CartListener>();
+
+export function subscribeToCartChanges(listener: CartListener) {
+  cartListeners.add(listener);
+
+  return () => {
+    cartListeners.delete(listener);
+  };
+}
+
+function notifyCartChanged() {
+  cartListeners.forEach((listener) => listener());
+}
+
+function getSelectionKey(product: ShopXProduct) {
+  const rawProduct = product as any;
+  const selectedOptions = rawProduct?.selectedOptions || {};
+
+  const optionKey = Object.entries(selectedOptions)
+    .map(([name, value]) => [String(name || "").trim(), String(value || "").trim()])
+    .filter(([name, value]) => name && value)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, value]) => `${name}:${value}`)
+    .join("|");
+
+  const variantKey = String(
+    rawProduct?.selectedVariantId ||
+      rawProduct?.selectedVariant?.id ||
+      rawProduct?.selectedVariant?.sku ||
+      ""
+  ).trim();
+
+  return optionKey || variantKey;
+}
+
 export function getProductKey(product: ShopXProduct) {
-  return (
+  const baseKey =
     product.slug ||
     product._id ||
     product.id ||
     product.externalId ||
-    product.title
-  );
+    product.title;
+
+  const selectionKey = getSelectionKey(product);
+
+  return selectionKey ? `${baseKey}__${selectionKey}` : baseKey;
 }
 
 export async function getCartItems(): Promise<CartItem[]> {
@@ -36,6 +76,19 @@ export async function getCartItems(): Promise<CartItem[]> {
   }
 }
 
+export async function getCartCount() {
+  try {
+    const cartItems = await getCartItems();
+
+    return cartItems.reduce((total, item) => {
+      return total + Number(item.quantity || 0);
+    }, 0);
+  } catch (error) {
+    console.log("ERROR GET CART COUNT:", error);
+    return 0;
+  }
+}
+
 export async function addProductToCart(product: ShopXProduct) {
   try {
     const currentCart = await getCartItems();
@@ -52,7 +105,7 @@ export async function addProductToCart(product: ShopXProduct) {
         index === existingIndex
           ? {
               ...item,
-              quantity: item.quantity + 1,
+              quantity: Number(item.quantity || 0) + 1,
             }
           : item
       );
@@ -68,6 +121,7 @@ export async function addProductToCart(product: ShopXProduct) {
     }
 
     await AsyncStorage.setItem(CART_KEY, JSON.stringify(nextCart));
+    notifyCartChanged();
 
     return nextCart;
   } catch (error) {
@@ -99,6 +153,7 @@ export async function updateCartItemQuantity(
           );
 
     await AsyncStorage.setItem(CART_KEY, JSON.stringify(nextCart));
+    notifyCartChanged();
 
     return nextCart;
   } catch (error) {
@@ -117,6 +172,7 @@ export async function removeProductFromCart(product: ShopXProduct) {
     );
 
     await AsyncStorage.setItem(CART_KEY, JSON.stringify(nextCart));
+    notifyCartChanged();
 
     return nextCart;
   } catch (error) {
@@ -127,4 +183,5 @@ export async function removeProductFromCart(product: ShopXProduct) {
 
 export async function clearCart() {
   await AsyncStorage.removeItem(CART_KEY);
+  notifyCartChanged();
 }

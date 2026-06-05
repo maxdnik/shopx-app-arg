@@ -15,6 +15,9 @@ import {
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ProductCard } from "../../components/ProductCard";
+import { useCartCount } from "../../hooks/useCartCount";
+import { useFavorites } from "../../hooks/useFavorites";
+import { useUnreadNotificationsCount } from "../../hooks/useNotifications";
 import {
   formatUSD,
   getDisplayFinalPriceUSD,
@@ -25,6 +28,12 @@ import {
 } from "../../lib/api";
 import { saveProductToCache } from "../../lib/product-cache";
 import { getAppAccount, getStoredUser, ShopXUser } from "../../lib/auth";
+import { getOfficialStores, ShopXStore } from "../../lib/stores";
+import {
+  canUseRemoteStoreLogo,
+  getStoreLogoSource,
+  getStoreLogoWordmark,
+} from "../../lib/store-logos";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -97,8 +106,12 @@ function CategoryIcon({
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const cartCount = useCartCount();
+  const { favoritesCount } = useFavorites();
+  const { unreadCount } = useUnreadNotificationsCount({ seedDemo: false });
 
   const [products, setProducts] = useState<ShopXProduct[]>([]);
+  const [stores, setStores] = useState<ShopXStore[]>([]);
   const [searchResults, setSearchResults] = useState<ShopXProduct[]>([]);
   const [homeSearch, setHomeSearch] = useState("");
   const [deliveryLabel, setDeliveryLabel] = useState("");
@@ -108,6 +121,26 @@ export default function HomeScreen() {
   const [searchError, setSearchError] = useState("");
 
   const isSearching = homeSearch.trim().length > 0;
+
+
+  async function loadStores() {
+    try {
+      const result = await getOfficialStores();
+      setStores(result);
+    } catch (error) {
+      console.log("ERROR HOME STORES:", error);
+      setStores([]);
+    }
+  }
+
+  function openStore(store: ShopXStore) {
+    if (!store?.slug) return;
+
+    router.push({
+      pathname: "/store/[slug]",
+      params: { slug: store.slug },
+    });
+  }
 
   async function loadProducts() {
     setLoading(true);
@@ -148,6 +181,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadProducts();
+    loadStores();
   }, []);
 
   useFocusEffect(
@@ -212,12 +246,34 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={styles.notificationButton}
                 activeOpacity={0.9}
-                onPress={() => {
-                  console.log("Notifications pressed");
-                }}
+                onPress={() => router.push("/notifications")}
               >
                 <Ionicons name="notifications-outline" size={19} color={text} />
-                <View style={styles.notificationDot} />
+
+                {unreadCount > 0 ? <View style={styles.notificationDot} /> : null}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.favoriteHeaderButton,
+                  favoritesCount > 0 && styles.favoriteHeaderButtonActive,
+                ]}
+                activeOpacity={0.9}
+                onPress={() => router.push("/favorites")}
+              >
+                <Feather
+                  name="heart"
+                  size={19}
+                  color={favoritesCount > 0 ? white : text}
+                />
+
+                {favoritesCount > 0 ? (
+                  <View style={styles.favoriteBadge}>
+                    <Text style={styles.favoriteBadgeText}>
+                      {favoritesCount > 99 ? "99+" : favoritesCount}
+                    </Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -226,9 +282,14 @@ export default function HomeScreen() {
                 onPress={() => router.push("/cart")}
               >
                 <Feather name="shopping-cart" size={20} color={white} />
-                <View style={styles.cartBadge}>
-                  <Text style={styles.cartBadgeText}>2</Text>
-                </View>
+
+                {cartCount > 0 ? (
+                  <View style={styles.cartBadge}>
+                    <Text style={styles.cartBadgeText}>
+                      {cartCount > 99 ? "99+" : cartCount}
+                    </Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
             </View>
           </View>
@@ -274,7 +335,8 @@ export default function HomeScreen() {
               <Feather name="map-pin" size={19} color={text} />
 
               <Text style={styles.deliveryText} numberOfLines={1}>
-                Enviar a: <Text style={styles.deliveryStrong}>{locationText}</Text>
+                Enviar a:{" "}
+                <Text style={styles.deliveryStrong}>{locationText}</Text>
               </Text>
 
               <Feather name="chevron-down" size={17} color={text} />
@@ -333,6 +395,74 @@ export default function HomeScreen() {
                   </View>
                 </View>
               </View>
+
+              {stores.length > 0 ? (
+                <View style={styles.storesBlock}>
+                  <View style={styles.storesHeader}>
+                    <View>
+                      <Text style={styles.storesEyebrow}>SHOPX ACCESS</Text>
+                      <Text style={styles.storesTitle}>Tiendas oficiales</Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.storesViewAllButton}
+                      activeOpacity={0.85}
+                      onPress={() => router.push("/stores")}
+                    >
+                      <Text style={styles.storesViewAllText}>Ver todas</Text>
+                      <Feather name="arrow-up-right" size={15} color={accent} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.storesRow}
+                  >
+                    {stores.map((store) => {
+                      const localLogo = getStoreLogoSource(store.slug);
+                      const remoteLogo = canUseRemoteStoreLogo(store.logo);
+                      const logoText = getStoreLogoWordmark(store);
+
+                      return (
+                        <TouchableOpacity
+                          key={store.slug}
+                          style={styles.storeCard}
+                          activeOpacity={0.9}
+                          onPress={() => openStore(store)}
+                        >
+                          <View style={styles.storeAccent} />
+
+                          <View style={styles.storeLogoBox}>
+                            {localLogo ? (
+                              <Image
+                                source={localLogo}
+                                style={styles.storeLogo}
+                                resizeMode="contain"
+                              />
+                            ) : remoteLogo ? (
+                              <Image
+                                source={{ uri: store.logo }}
+                                style={styles.storeLogo}
+                                resizeMode="contain"
+                              />
+                            ) : (
+                              <Text style={styles.storeWordmark} numberOfLines={2}>
+                                {logoText}
+                              </Text>
+                            )}
+                          </View>
+
+                          <Text style={styles.storeName} numberOfLines={1}>
+                            {store.name}
+                          </Text>
+                          <Text style={styles.storeSubtitle}>Tienda USA</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : null}
 
               <ScrollView
                 horizontal
@@ -431,7 +561,9 @@ export default function HomeScreen() {
 
                     <Text style={styles.heroProductPrice}>
                       {heroProduct
-                        ? `USD ${formatUSD(getDisplayFinalPriceUSD(heroProduct))}`
+                        ? `USD ${formatUSD(
+                            getDisplayFinalPriceUSD(heroProduct)
+                          )}`
                         : "USD 2,499"}
                     </Text>
 
@@ -703,6 +835,55 @@ const styles = StyleSheet.create({
     backgroundColor: accent,
   },
 
+  favoriteHeaderButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#DDE7F0",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+
+    shadowColor: navy,
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+
+  favoriteHeaderButtonActive: {
+    backgroundColor: accent,
+    borderColor: accent,
+    shadowColor: accent,
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+
+  favoriteBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    minWidth: 19,
+    height: 19,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    backgroundColor: navy,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: soft,
+  },
+
+  favoriteBadgeText: {
+    color: white,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
   cartButton: {
     width: 44,
     height: 44,
@@ -723,8 +904,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: -3,
     right: -3,
-    width: 19,
+    minWidth: 19,
     height: 19,
+    paddingHorizontal: 4,
     borderRadius: 10,
     backgroundColor: accent,
     alignItems: "center",
@@ -892,6 +1074,126 @@ const styles = StyleSheet.create({
     width: 1,
     height: 38,
     backgroundColor: "#DDE6EF",
+  },
+
+
+  storesBlock: {
+    marginTop: 17,
+  },
+
+  storesHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+
+  storesEyebrow: {
+    color: accent,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.4,
+  },
+
+  storesTitle: {
+    marginTop: 3,
+    color: text,
+    fontSize: 21,
+    fontWeight: "900",
+    letterSpacing: -0.45,
+  },
+
+  storesViewAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingBottom: 3,
+  },
+
+  storesViewAllText: {
+    color: accent,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  storesRow: {
+    gap: 12,
+    paddingLeft: 1,
+    paddingRight: 18,
+    paddingBottom: 4,
+  },
+
+  storeCard: {
+    width: 126,
+    minHeight: 132,
+    borderRadius: 24,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#DDE7F0",
+    padding: 13,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+
+    shadowColor: navy,
+    shadowOpacity: 0.055,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 2,
+  },
+
+  storeAccent: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: accent,
+  },
+
+  storeLogoBox: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E7EEF5",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 5,
+    marginBottom: 12,
+    alignSelf: "center",
+  },
+
+  storeLogo: {
+    width: 45,
+    height: 32,
+  },
+
+  storeWordmark: {
+    color: navy,
+    fontSize: 13,
+    lineHeight: 15,
+    fontWeight: "900",
+    textAlign: "center",
+    letterSpacing: -0.2,
+  },
+
+  storeName: {
+    color: text,
+    fontSize: 14,
+    fontWeight: "900",
+    textAlign: "center",
+    width: "100%",
+  },
+
+  storeSubtitle: {
+    marginTop: 3,
+    color: muted,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+    width: "100%",
   },
 
   categoriesRow: {

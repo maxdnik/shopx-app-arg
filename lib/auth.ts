@@ -352,3 +352,22 @@ export async function isLoggedIn() {
   const token = await getAuthToken();
   return Boolean(token);
 }
+export async function forgotPasswordApp(email: string): Promise<boolean> {
+  const clean = cleanEmail(email);
+
+  if (!clean) {
+    throw new Error("Ingresá tu email.");
+  }
+
+  const response = await fetch(buildApiUrl("/api/auth/forgot-password"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email: clean }),
+  });
+
+  await parseJsonResponse<{ ok: boolean }>(response);
+
+  return true;
+}

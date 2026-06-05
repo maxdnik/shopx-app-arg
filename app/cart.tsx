@@ -21,15 +21,17 @@ import {
   updateCartItemQuantity,
 } from "../lib/cart-store";
 import {
+  DomesticPricingDestination,
   formatUSD,
   getDisplayFinalPriceUSD,
+  getProductBySlug,
   getProductImage,
-  getProducts,
-  searchProducts,
+  getSelectedOptionsSummary,
+  resolveProductsBySlugs,
+  resolveProductsForCartItems,
   ShopXProduct,
 } from "../lib/api";
 import {
-  createAppOrder,
   createMercadoPagoCheckout,
   getExchangeRate,
   PricingBreakdownRow,
@@ -100,13 +102,13 @@ function getUserDisplayName(user: ShopXUser | null) {
 function normalizeBreakdownLabel(label: string) {
   const clean = normalizeText(label);
 
-  if (clean.includes("producto")) return "Productos USA";
-  if (clean.includes("iva")) return "IVA importación";
+  if (clean.includes("producto")) return "Precio Productos USA";
+  if (clean.includes("iva")) return "IVA importación (21%)";
   if (clean.includes("flete") || clean.includes("internacional")) {
-    return "Flete internacional";
+    return "Flete Internacional";
   }
   if (clean.includes("aduana") || clean.includes("tasas")) {
-    return "Aduana y tasas";
+    return "Aduana y Tasas";
   }
   if (
     clean.includes("gestión") ||
@@ -114,10 +116,10 @@ function normalizeBreakdownLabel(label: string) {
     clean.includes("seguro") ||
     clean.includes("shopx")
   ) {
-    return "Gestión y seguro ShopX";
+    return "Gestión y Seguro ShopX";
   }
   if (clean.includes("nacional") || clean.includes("local")) {
-    return "Logística nacional";
+    return "Logística Nacional";
   }
 
   return String(label || "Concepto");
@@ -160,155 +162,164 @@ function getProductBreakdown(product: ShopXProduct): BreakdownRow[] {
       label: normalizeBreakdownLabel(getBreakdownLabel(row)),
       amount: getBreakdownAmount(row),
     }))
-    .filter((row) => row.label && row.amount > 0);
+    .filter((row) => row.label && Number.isFinite(row.amount) && row.amount >= 0);
 }
 
+const REQUIRED_BREAKDOWN_ROWS = [
+  "Precio Productos USA",
+  "IVA importación (21%)",
+  "Flete Internacional",
+  "Aduana y Tasas",
+  "Gestión y Seguro ShopX",
+  "Logística Nacional",
+];
+
 function getCartBreakdown(items: CartItem[]) {
-  const totals: Record<string, number> = {};
+  // Inicializamos todas las filas en cero para que la app muestre
+  // exactamente los mismos conceptos que la web, incluso cuando un concepto vale USD 0.
+  const totals: Record<string, number> = REQUIRED_BREAKDOWN_ROWS.reduce(
+    (acc, label) => {
+      acc[label] = 0;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 
   items.forEach((item) => {
     const quantity = Number(item.quantity || 1);
     const breakdown = getProductBreakdown(item.product);
 
     breakdown.forEach((row) => {
-      totals[row.label] = (totals[row.label] || 0) + row.amount * quantity;
+      const label = normalizeBreakdownLabel(row.label);
+      totals[label] = (totals[label] || 0) + Number(row.amount || 0) * quantity;
     });
   });
 
-  const preferredOrder = [
-    "Productos USA",
-    "IVA importación",
-    "Flete internacional",
-    "Aduana y tasas",
-    "Gestión y seguro ShopX",
-    "Logística nacional",
-  ];
-
-  return Object.entries(totals)
-    .map(([label, amount]) => ({
-      label,
-      amount,
-    }))
-    .sort((a, b) => {
-      const indexA = preferredOrder.indexOf(a.label);
-      const indexB = preferredOrder.indexOf(b.label);
-
-      if (indexA === -1 && indexB === -1) {
-        return a.label.localeCompare(b.label);
-      }
-
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
-
-      return indexA - indexB;
-    });
+  return REQUIRED_BREAKDOWN_ROWS.map((label) => ({
+    label,
+    amount: Number((totals[label] || 0).toFixed(2)),
+  }));
 }
 
-function getProductMatchScore(
-  cartProduct: ShopXProduct,
-  freshProduct: ShopXProduct
-) {
-  let score = 0;
+function getProductResolveKeys(product: ShopXProduct) {
+  const rawProduct = product as any;
 
-  if (
-    cartProduct.slug &&
-    freshProduct.slug &&
-    cartProduct.slug === freshProduct.slug
-  ) {
-    score += 100;
-  }
-
-  if (
-    cartProduct._id &&
-    freshProduct._id &&
-    cartProduct._id === freshProduct._id
-  ) {
-    score += 90;
-  }
-
-  if (cartProduct.id && freshProduct.id && cartProduct.id === freshProduct.id) {
-    score += 90;
-  }
-
-  if (
-    cartProduct.externalId &&
-    freshProduct.externalId &&
-    cartProduct.externalId === freshProduct.externalId
-  ) {
-    score += 80;
-  }
-
-  if (
-    cartProduct.sourceUrl &&
-    freshProduct.sourceUrl &&
-    cartProduct.sourceUrl === freshProduct.sourceUrl
-  ) {
-    score += 70;
-  }
-
-  if (
-    normalizeText(cartProduct.title) &&
-    normalizeText(cartProduct.title) === normalizeText(freshProduct.title)
-  ) {
-    score += 50;
-  }
-
-  return score;
+  return [
+    product.slug,
+    product._id,
+    product.id,
+    product.externalId,
+    rawProduct.sourceId,
+    rawProduct.sourceHandle,
+    product.sourceUrl,
+    product.title,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
 }
 
-function findBestFreshProduct(
-  cartProduct: ShopXProduct,
-  products: ShopXProduct[]
-) {
-  let bestProduct: ShopXProduct | null = null;
-  let bestScore = 0;
+function indexProductsByKeys(products: ShopXProduct[]) {
+  const index = new Map<string, ShopXProduct>();
 
   products.forEach((product) => {
-    const score = getProductMatchScore(cartProduct, product);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestProduct = product;
-    }
+    getProductResolveKeys(product).forEach((key) => {
+      index.set(normalizeText(key), product);
+    });
   });
 
-  return bestScore > 0 ? bestProduct : null;
+  return index;
 }
 
-async function hydrateCartWithFreshPricing(cartItems: CartItem[]) {
-  let latestProducts: ShopXProduct[] = [];
+function mergeFreshProduct(item: CartItem, freshProduct: ShopXProduct): CartItem {
+  const itemProduct = item.product as any;
+  const fresh = freshProduct as any;
+
+  return {
+    ...item,
+    product: {
+      ...item.product,
+      ...freshProduct,
+      selectedOptions: fresh.selectedOptions || itemProduct.selectedOptions,
+      selectedVariant: fresh.selectedVariant || itemProduct.selectedVariant,
+      selectedVariantId: fresh.selectedVariantId || itemProduct.selectedVariantId,
+      pricing: fresh?.pricing || itemProduct?.pricing,
+    },
+  };
+}
+
+async function hydrateCartWithFreshPricing(
+  cartItems: CartItem[],
+  destination?: DomesticPricingDestination
+) {
+  if (!cartItems.length) return [];
+
+  const resolveKeys = Array.from(
+    new Set(
+      cartItems
+        .flatMap((item) => getProductResolveKeys(item.product))
+        .map((key) => key.trim())
+        .filter(Boolean)
+    )
+  );
+
+  let resolvedProducts: ShopXProduct[] = [];
 
   try {
-    latestProducts = await getProducts(1000);
+    const selectedItemRequests = cartItems.map((item) => {
+      const rawProduct = item.product as any;
+      const key = getProductResolveKeys(item.product)[0];
+
+      return {
+        key,
+        selectedOptions: rawProduct.selectedOptions,
+        selectedVariantId: rawProduct.selectedVariantId || rawProduct.selectedVariant?.id,
+        quantity: Number(item.quantity || 1),
+      };
+    });
+
+    resolvedProducts = await resolveProductsForCartItems(
+      selectedItemRequests,
+      destination
+    );
+
+    if (resolvedProducts.length === cartItems.length) {
+      return cartItems.map((item, index) => mergeFreshProduct(item, resolvedProducts[index]));
+    }
   } catch (error) {
-    console.log("ERROR GET PRODUCTS FOR CART:", error);
+    console.log("ERROR RESOLVE SELECTED PRODUCTS FOR CART:", error);
   }
+
+  try {
+    resolvedProducts = await resolveProductsBySlugs(resolveKeys, destination);
+  } catch (error) {
+    console.log("ERROR RESOLVE PRODUCTS FOR CART:", error);
+  }
+
+  const resolvedIndex = indexProductsByKeys(resolvedProducts);
 
   const hydratedItems = await Promise.all(
     cartItems.map(async (item) => {
-      let freshProduct = findBestFreshProduct(item.product, latestProducts);
+      const matchedProduct = getProductResolveKeys(item.product)
+        .map((key) => resolvedIndex.get(normalizeText(key)))
+        .find(Boolean);
 
-      if (!freshProduct) {
+      if (matchedProduct) {
+        return mergeFreshProduct(item, matchedProduct);
+      }
+
+      if (item.product.slug) {
         try {
-          const query = item.product.slug || item.product.title || "";
-          const results = await searchProducts(query);
-          freshProduct = findBestFreshProduct(item.product, results);
+          const productBySlug = await getProductBySlug(item.product.slug, destination);
+
+          if (productBySlug) {
+            return mergeFreshProduct(item, productBySlug);
+          }
         } catch (error) {
-          console.log("ERROR SEARCH PRODUCT FOR CART:", error);
+          console.log("ERROR GET PRODUCT BY SLUG FOR CART:", error);
         }
       }
 
-      if (!freshProduct) return item;
-
-      return {
-        ...item,
-        product: {
-          ...item.product,
-          ...freshProduct,
-          pricing:
-            (freshProduct as any)?.pricing || (item.product as any)?.pricing,
-        },
-      };
+      return item;
     })
   );
 
@@ -339,6 +350,9 @@ function buildOrderItems(items: CartItem[]) {
       source: product.source,
       category: product.category,
       pricing: product.pricing,
+      selectedOptions: product.selectedOptions,
+      selectedVariant: product.selectedVariant,
+      selectedVariantId: product.selectedVariantId || product.selectedVariant?.id,
     };
   });
 }
@@ -351,6 +365,24 @@ function buildAddressText(user: ShopXUser) {
       .join(" ");
 
   return street || "A confirmar";
+}
+
+function buildDomesticPricingDestination(
+  user?: ShopXUser | null
+): DomesticPricingDestination | undefined {
+  if (!user) return undefined;
+
+  const province = String(
+    user.address?.province || user.billing?.province || ""
+  ).trim();
+  const city = String(user.address?.city || user.billing?.city || "").trim();
+  const postalCode = String(
+    user.address?.postalCode || user.billing?.postalCode || ""
+  ).trim();
+
+  if (!province && !city && !postalCode) return undefined;
+
+  return { province, city, postalCode };
 }
 
 export default function CartScreen() {
@@ -403,7 +435,10 @@ export default function CartScreen() {
 
     setUser(nextUser);
 
-    const hydratedItems = await hydrateCartWithFreshPricing(cartItems);
+    const hydratedItems = await hydrateCartWithFreshPricing(
+      cartItems,
+      buildDomesticPricingDestination(nextUser)
+    );
 
     setItems(hydratedItems);
     setLoading(false);
@@ -473,14 +508,8 @@ export default function CartScreen() {
         "Iniciá sesión para comprar",
         "Necesitás una cuenta ShopX para pagar y seguir tu pedido.",
         [
-          {
-            text: "Cancelar",
-            style: "cancel",
-          },
-          {
-            text: "Ir a mi cuenta",
-            onPress: () => router.push("/profile"),
-          },
+          { text: "Cancelar", style: "cancel" },
+          { text: "Ir a mi cuenta", onPress: () => router.push("/profile") },
         ]
       );
       return;
@@ -502,14 +531,8 @@ export default function CartScreen() {
           "Completá tus datos",
           "Para comprar necesitamos tu teléfono, DNI/CUIT y dirección de entrega.",
           [
-            {
-              text: "Cancelar",
-              style: "cancel",
-            },
-            {
-              text: "Completar perfil",
-              onPress: () => router.push("/profile"),
-            },
+            { text: "Cancelar", style: "cancel" },
+            { text: "Completar perfil", onPress: () => router.push("/profile") },
           ]
         );
 
@@ -517,67 +540,67 @@ export default function CartScreen() {
       }
 
       const checkoutUser = account.user;
+      const buyer = {
+        fullName: getUserDisplayName(checkoutUser),
+        email: checkoutUser.email,
+        phone: checkoutUser.phone || "",
+        dni: checkoutUser.dni || checkoutUser.billing?.dni || "",
+        province:
+          checkoutUser.address?.province || checkoutUser.billing?.province || "",
+        city: checkoutUser.address?.city || checkoutUser.billing?.city || "",
+        address:
+          buildAddressText(checkoutUser) || checkoutUser.billing?.address || "",
+        postalCode:
+          checkoutUser.address?.postalCode ||
+          checkoutUser.billing?.postalCode ||
+          "",
+      };
 
-      const orderResponse = await createAppOrder({
-        buyer: {
-          fullName: getUserDisplayName(checkoutUser),
-          email: checkoutUser.email,
-          phone: checkoutUser.phone || "",
-          dni: checkoutUser.dni || checkoutUser.billing?.dni || "",
-          province:
-            checkoutUser.address?.province ||
-            checkoutUser.billing?.province ||
-            "",
-          city:
-            checkoutUser.address?.city || checkoutUser.billing?.city || "",
-          address:
-            buildAddressText(checkoutUser) ||
-            checkoutUser.billing?.address ||
-            "",
-          postalCode:
-            checkoutUser.address?.postalCode ||
-            checkoutUser.billing?.postalCode ||
-            "",
-        },
-        destination: {
-          province:
-            checkoutUser.address?.province ||
-            checkoutUser.billing?.province ||
-            "",
-          city:
-            checkoutUser.address?.city || checkoutUser.billing?.city || "",
-          address:
-            buildAddressText(checkoutUser) ||
-            checkoutUser.billing?.address ||
-            "",
-          postalCode:
-            checkoutUser.address?.postalCode ||
-            checkoutUser.billing?.postalCode ||
-            "",
-        },
+      const destination = {
+        province:
+          checkoutUser.address?.province || checkoutUser.billing?.province || "",
+        city: checkoutUser.address?.city || checkoutUser.billing?.city || "",
+        address:
+          buildAddressText(checkoutUser) || checkoutUser.billing?.address || "",
+        postalCode:
+          checkoutUser.address?.postalCode ||
+          checkoutUser.billing?.postalCode ||
+          "",
+      };
+
+      const shippingUSD = paymentBreakdown
+        .filter((row) => {
+          const label = normalizeText(row.label);
+          return (
+            label.includes("logística") ||
+            label.includes("logistica") ||
+            label.includes("nacional")
+          );
+        })
+        .reduce((total, row) => total + Number(row.amount || 0), 0);
+
+      /**
+       * CRÍTICO:
+       * Antes la app creaba una orden en /api/app/orders ANTES de pagar y después
+       * iniciaba Mercado Pago usando esa orden. Eso generaba órdenes pendientes
+       * duplicadas y, además, el backend volvía a recalcular con otro pricing.
+       *
+       * Ahora la app envía un snapshot exacto del carrito al endpoint de Mercado Pago.
+       * El backend crea una CheckoutSession temporal, cobra ese mismo monto y recién
+       * crea la Order real cuando el webhook confirma payment.status === "approved".
+       */
+      const checkoutResponse = await createMercadoPagoCheckout({
+        buyer,
+        destination,
         items: buildOrderItems(items),
         totalUSD,
         totalARS,
         exchangeRateUsed: exchangeRate,
         pricingBreakdown: paymentBreakdown as PricingBreakdownRow[],
-        shippingUSD: 0,
+        shippingUSD,
         otherFeesUSD: 0,
-      });
-
-      const orderId =
-        orderResponse.orderNumber ||
-        orderResponse.orderId ||
-        orderResponse.mongoId;
-
-      if (!orderId) {
-        throw new Error("No se pudo crear la orden.");
-      }
-
-      const checkoutResponse = await createMercadoPagoCheckout({
-        orderId,
         email: checkoutUser.email,
         phone: checkoutUser.phone || "",
-        exchangeRate,
       });
 
       const checkoutUrl =
@@ -587,6 +610,14 @@ export default function CartScreen() {
         throw new Error("Mercado Pago no devolvió un link de pago.");
       }
 
+      console.log("SHOPX MP CHECKOUT:", {
+        checkoutSessionId: checkoutResponse.checkoutSessionId,
+        totalUSD,
+        totalARS,
+        exchangeRateUsed: exchangeRate,
+        mpTotalARS: checkoutResponse.totalARS,
+      });
+
       await Linking.openURL(checkoutUrl);
     } catch (error: any) {
       console.log("ERROR CHECKOUT CART:", error);
@@ -594,7 +625,7 @@ export default function CartScreen() {
       Alert.alert(
         "No pudimos iniciar el pago",
         error?.message ||
-          "Hubo un problema creando la orden o conectando con Mercado Pago."
+          "Hubo un problema conectando con Mercado Pago."
       );
     } finally {
       setCheckoutLoading(false);
@@ -723,6 +754,16 @@ export default function CartScreen() {
                       <Text style={styles.productTitle} numberOfLines={2}>
                         {getProductTitle(item)}
                       </Text>
+
+                      {getSelectedOptionsSummary(item.product).length > 0 ? (
+                        <View style={styles.selectedOptionsWrap}>
+                          {getSelectedOptionsSummary(item.product).map((option) => (
+                            <Text key={option} style={styles.selectedOptionText} numberOfLines={1}>
+                              {option}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
 
                       <Text style={styles.priceLabel}>FINAL ARGENTINA</Text>
 
@@ -1213,6 +1254,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     fontWeight: "900",
+  },
+  selectedOptionsWrap: {
+    marginTop: 8,
+    gap: 4,
+  },
+  selectedOptionText: {
+    color: muted,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
   },
   priceLabel: {
     marginTop: 10,
