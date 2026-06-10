@@ -1,5 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import * as AuthSession from "expo-auth-session";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -29,7 +30,9 @@ import {
   getStoredUser,
   loginApp,
   loginWithGoogleApp,
+  loginWithAppleApp,
   logoutApp,
+  deleteAppAccount,
   registerApp,
   ShopXUser,
   updateAppAccount,
@@ -211,6 +214,9 @@ export default function ProfileScreen() {
   const [loadingSession, setLoadingSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [editCheckoutData, setEditCheckoutData] = useState(false);
   const [checkoutCardY, setCheckoutCardY] = useState(0);
@@ -339,6 +345,12 @@ export default function ProfileScreen() {
   }
 
   useEffect(() => {
+    AppleAuthentication.isAvailableAsync()
+      .then(setAppleAvailable)
+      .catch(() => setAppleAvailable(false));
+  }, []);
+
+  useEffect(() => {
     async function finishGoogleLogin() {
       if (googleResponse?.type !== "success") return;
 
@@ -426,8 +438,55 @@ export default function ProfileScreen() {
     Linking.openURL("https://wa.me/5491150000000");
   }
 
+  async function handleAppleLogin() {
+    if (appleLoading || googleLoading || submitting) return;
+
+    try {
+      setAppleLoading(true);
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!credential.identityToken) {
+        throw new Error("Apple no devolvió un token de identidad.");
+      }
+
+      const fullName = [
+        credential.fullName?.givenName,
+        credential.fullName?.middleName,
+        credential.fullName?.familyName,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const loggedUser = await loginWithAppleApp({
+        identityToken: credential.identityToken,
+        authorizationCode: credential.authorizationCode,
+        email: credential.email,
+        fullName,
+      });
+
+      await hydrateAccountAfterAuth(loggedUser);
+
+      Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
+    } catch (error: any) {
+      if (error?.code === "ERR_REQUEST_CANCELED") return;
+
+      Alert.alert(
+        "No pudimos iniciar sesión con Apple",
+        error?.message || "Intentá nuevamente."
+      );
+    } finally {
+      setAppleLoading(false);
+    }
+  }
+
   async function handleGoogleLogin() {
-    if (googleLoading || submitting) return;
+    if (googleLoading || appleLoading || submitting) return;
 
     if (!GOOGLE_AUTH_CONFIG.webClientId) {
       Alert.alert(
@@ -548,7 +607,7 @@ export default function ProfileScreen() {
   );
 
   async function handleLogin() {
-    if (submitting || googleLoading) return;
+    if (submitting || googleLoading || appleLoading) return;
 
     if (!loginEmail.trim() || !loginPassword) {
       Alert.alert("Faltan datos", "Ingresá email y contraseña.");
@@ -578,7 +637,7 @@ export default function ProfileScreen() {
   }
 
   async function handleRegister() {
-    if (submitting || googleLoading) return;
+    if (submitting || googleLoading || appleLoading) return;
 
     if (!registerName.trim()) {
       Alert.alert("Falta nombre", "Ingresá tu nombre y apellido.");
@@ -739,6 +798,66 @@ export default function ProfileScreen() {
         },
       },
     ]);
+  }
+
+  async function confirmDeleteAccount() {
+    if (deletingAccount) return;
+
+    Alert.alert(
+      "Eliminar cuenta",
+      "Esta acción elimina tu cuenta ShopX y cierra la sesión en este dispositivo. No es una desactivación temporal.",
+      [
+        {
+          text: "Cancelar",
+          style: "cancel",
+        },
+        {
+          text: "Eliminar definitivamente",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setDeletingAccount(true);
+              await deleteAppAccount();
+
+              setUser(null);
+              setCheckoutProfile(null);
+              setProfileOrders([]);
+              setEditCheckoutData(false);
+
+              setLoginEmail("");
+              setLoginPassword("");
+              setRegisterName("");
+              setRegisterEmail("");
+              setRegisterPhone("");
+              setRegisterPassword("");
+
+              setFormFullName("");
+              setFormPhone("");
+              setFormDni("");
+              setFormStreetName("");
+              setFormStreetNumber("");
+              setFormFloor("");
+              setFormApartment("");
+              setFormCity("");
+              setFormProvince("");
+              setFormPostalCode("");
+
+              Alert.alert(
+                "Cuenta eliminada",
+                "Tu cuenta fue eliminada correctamente."
+              );
+            } catch (error: any) {
+              Alert.alert(
+                "No pudimos eliminar la cuenta",
+                error?.message || "Intentá nuevamente en unos minutos."
+              );
+            } finally {
+              setDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   const orderStats = getOrderStats(profileOrders);
@@ -1157,6 +1276,21 @@ export default function ProfileScreen() {
               <Text style={styles.whatsappButtonText}>Hablar con ShopX</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={[styles.deleteAccountButton, deletingAccount && styles.buttonDisabled]}
+              onPress={confirmDeleteAccount}
+              disabled={deletingAccount}
+            >
+              {deletingAccount ? (
+                <ActivityIndicator color="#C53030" />
+              ) : (
+                <>
+                  <Feather name="trash-2" size={18} color="#C53030" />
+                  <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
               <Feather name="log-out" size={18} color={muted} />
               <Text style={styles.logoutText}>Cerrar sesión</Text>
@@ -1182,15 +1316,37 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
+              {appleAvailable ? (
+                <TouchableOpacity
+                  style={[
+                    styles.appleButton,
+                    (appleLoading || googleLoading || submitting) &&
+                      styles.buttonDisabled,
+                  ]}
+                  activeOpacity={0.9}
+                  onPress={handleAppleLogin}
+                  disabled={appleLoading || googleLoading || submitting}
+                >
+                  {appleLoading ? (
+                    <ActivityIndicator color={white} />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons name="apple" size={22} color={white} />
+                      <Text style={styles.appleButtonText}>Continuar con Apple</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : null}
+
               <TouchableOpacity
                 style={[
                   styles.googleButton,
-                  (!googleRequest || googleLoading || submitting) &&
+                  (!googleRequest || googleLoading || appleLoading || submitting) &&
                     styles.buttonDisabled,
                 ]}
                 activeOpacity={0.9}
                 onPress={handleGoogleLogin}
-                disabled={!googleRequest || googleLoading || submitting}
+                disabled={!googleRequest || googleLoading || appleLoading || submitting}
               >
                 {googleLoading ? (
                   <ActivityIndicator color={text} />
@@ -1275,7 +1431,7 @@ export default function ProfileScreen() {
                     style={styles.forgotPasswordButton}
                     activeOpacity={0.85}
                     onPress={handleForgotPassword}
-                    disabled={submitting || googleLoading}
+                    disabled={submitting || googleLoading || appleLoading}
                   >
                     <Text style={styles.forgotPasswordText}>Olvidé mi contraseña</Text>
                   </TouchableOpacity>
@@ -1283,11 +1439,11 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     style={[
                       styles.authSubmitButton,
-                      (submitting || googleLoading) && styles.buttonDisabled,
+                      (submitting || googleLoading || appleLoading) && styles.buttonDisabled,
                     ]}
                     activeOpacity={0.9}
                     onPress={handleLogin}
-                    disabled={submitting || googleLoading}
+                    disabled={submitting || googleLoading || appleLoading}
                   >
                     {submitting ? (
                       <ActivityIndicator color={white} />
@@ -1340,11 +1496,11 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     style={[
                       styles.authSubmitButton,
-                      (submitting || googleLoading) && styles.buttonDisabled,
+                      (submitting || googleLoading || appleLoading) && styles.buttonDisabled,
                     ]}
                     activeOpacity={0.9}
                     onPress={handleRegister}
-                    disabled={submitting || googleLoading}
+                    disabled={submitting || googleLoading || appleLoading}
                   >
                     {submitting ? (
                       <ActivityIndicator color={white} />
@@ -1939,6 +2095,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "900",
   },
+  deleteAccountButton: {
+    marginHorizontal: 18,
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 18,
+    backgroundColor: "#FFF5F5",
+    borderWidth: 1,
+    borderColor: "#FED7D7",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  deleteAccountText: {
+    color: "#C53030",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
   logoutButton: {
     marginTop: 18,
     alignSelf: "center",
@@ -1993,6 +2168,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontWeight: "600",
+  },
+
+  appleButton: {
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  appleButtonText: {
+    color: white,
+    fontSize: 15,
+    fontWeight: "900",
   },
 
   googleButton: {

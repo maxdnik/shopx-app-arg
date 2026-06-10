@@ -13,6 +13,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.maximodimnik.shopx",
       "buildNumber": "2",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -51,7 +52,8 @@
       ],
       "expo-web-browser",
       "expo-dev-client",
-      "expo-font"
+      "expo-font",
+      "expo-apple-authentication"
     ],
 
     "experiments": {

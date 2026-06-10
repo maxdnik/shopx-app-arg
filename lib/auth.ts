@@ -87,6 +87,13 @@ export type GoogleLoginPayload = {
   idToken: string;
 };
 
+export type AppleLoginPayload = {
+  identityToken: string;
+  authorizationCode?: string | null;
+  email?: string | null;
+  fullName?: string | null;
+};
+
 export type UpdateAccountPayload = {
   fullName?: string;
   name?: string;
@@ -189,6 +196,39 @@ export async function loginWithGoogleApp(
 
   if (!data.token || !data.user) {
     throw new Error("No se pudo iniciar sesión con Google.");
+  }
+
+  await saveSession(data.token, data.user);
+
+  return data.user;
+}
+
+export async function loginWithAppleApp(
+  payload: AppleLoginPayload
+): Promise<ShopXUser> {
+  const identityToken = String(payload.identityToken || "").trim();
+
+  if (!identityToken) {
+    throw new Error("Apple no devolvió una sesión válida.");
+  }
+
+  const response = await fetch(buildApiUrl("/api/app/auth/apple"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      identityToken,
+      authorizationCode: payload.authorizationCode || "",
+      email: payload.email || "",
+      fullName: payload.fullName || "",
+    }),
+  });
+
+  const data = await parseJsonResponse<AuthResponse>(response);
+
+  if (!data.token || !data.user) {
+    throw new Error("No se pudo iniciar sesión con Apple.");
   }
 
   await saveSession(data.token, data.user);
@@ -342,6 +382,26 @@ export async function hasCheckoutProfileComplete(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function deleteAppAccount(): Promise<boolean> {
+  const token = await getAuthToken();
+
+  if (!token) {
+    throw new Error("Necesitás iniciar sesión.");
+  }
+
+  const response = await fetch(buildApiUrl("/api/app/account"), {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  await parseJsonResponse<{ ok: boolean }>(response);
+  await logoutApp();
+
+  return true;
 }
 
 export async function logoutApp() {
