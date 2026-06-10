@@ -474,7 +474,12 @@ export default function ProfileScreen() {
 
       Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
     } catch (error: any) {
-      if (error?.code === "ERR_REQUEST_CANCELED") return;
+      if (
+        error?.code === "ERR_REQUEST_CANCELED" ||
+        error?.code === "ERR_CANCELED"
+      ) {
+        return;
+      }
 
       Alert.alert(
         "No pudimos iniciar sesión con Apple",
@@ -804,15 +809,15 @@ export default function ProfileScreen() {
     if (deletingAccount) return;
 
     Alert.alert(
-      "Eliminar cuenta",
-      "Esta acción elimina tu cuenta ShopX y cierra la sesión en este dispositivo. No es una desactivación temporal.",
+      "¿Eliminar cuenta?",
+      "Esta acción es permanente y no puede deshacerse. Se eliminará tu cuenta y tus datos personales de ShopX.",
       [
         {
           text: "Cancelar",
           style: "cancel",
         },
         {
-          text: "Eliminar definitivamente",
+          text: "Eliminar",
           style: "destructive",
           onPress: async () => {
             try {

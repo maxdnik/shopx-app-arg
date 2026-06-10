@@ -1,6 +1,9 @@
 // lib/auth.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { clearCart } from "./cart-store";
 import { buildApiUrl } from "./config";
+import { clearFavorites } from "./favorites-store";
+import { clearNotifications } from "./notifications-store";
 
 const AUTH_TOKEN_KEY = "shopx_auth_token";
 const AUTH_USER_KEY = "shopx_auth_user";
@@ -384,6 +387,22 @@ export async function hasCheckoutProfileComplete(): Promise<boolean> {
   }
 }
 
+async function clearLocalUserData() {
+  // La eliminación remota ya se concretó: la limpieza local nunca debe
+  // abortar el flujo, por eso cada storage se limpia de forma defensiva.
+  const results = await Promise.allSettled([
+    clearCart(),
+    clearFavorites(),
+    clearNotifications(),
+  ]);
+
+  results.forEach((result) => {
+    if (result.status === "rejected") {
+      console.log("CLEAR LOCAL USER DATA ERROR:", result.reason);
+    }
+  });
+}
+
 export async function deleteAppAccount(): Promise<boolean> {
   const token = await getAuthToken();
 
@@ -399,7 +418,9 @@ export async function deleteAppAccount(): Promise<boolean> {
   });
 
   await parseJsonResponse<{ ok: boolean }>(response);
+
   await logoutApp();
+  await clearLocalUserData();
 
   return true;
 }
