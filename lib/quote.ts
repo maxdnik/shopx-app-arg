@@ -1,33 +1,108 @@
 // lib/quote.ts
+import { Linking } from "react-native";
 import { buildApiUrl } from "./config";
-import { getAuthToken, getStoredUser } from "./auth";
+import { getAuthToken } from "./auth";
+
+export type QuoteProductPayload = {
+  sourceUrl: string;
+  productName?: string;
+  requestedSize?: string;
+  requestedColor?: string;
+  customerNotes?: string;
+  quantity?: number;
+};
 
 export type QuoteRequestPayload = {
-  productUrl: string;
+  productUrl?: string;
   productName?: string;
   store?: string;
   quantity?: number;
   comments?: string;
   contact?: string;
   urgency?: "normal" | "urgent" | "not_sure";
+  requestedSize?: string;
+  requestedColor?: string;
+  products?: QuoteProductPayload[];
+};
+
+export type QuotePricingLine = {
+  label: string;
+  usd?: number;
+  ars?: number;
+  value?: number;
+};
+
+export type CustomerQuote = {
+  id: string;
+  quoteNumber: string;
+  status: string;
+  statusLabel?: string;
+  sourceUrl: string;
+  requestedSize?: string;
+  requestedColor?: string;
+  requestedQuantity?: number;
+  customerNotes?: string;
+  productTitle?: string;
+  productImage?: string;
+  brand?: string;
+  store?: string;
+  pricing?: {
+    breakdown?: QuotePricingLine[];
+    totalUsd?: number;
+    exchangeRate?: number;
+    totalArs?: number;
+  } | null;
+  sentAt?: string | null;
+  expiresAt?: string | null;
+  paidAt?: string | null;
+  orderNumber?: string;
+  timeline?: { status: string; label?: string; at?: string }[];
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type QuoteRequestResponse = {
   ok: boolean;
-  quote?: {
-    id?: string;
-    quoteNumber?: string;
-    status?: string;
-    productUrl?: string;
-    contact?: string;
-    createdAt?: string;
-  };
   message?: string;
+  quotes?: CustomerQuote[];
+  quote?: CustomerQuote;
   error?: string;
+  reason?: string;
+};
+
+export type QuoteProfileResponse = {
+  ok: boolean;
+  message?: string;
+  quote?: CustomerQuote;
+  profile?: { complete: boolean; missingFields: any[] };
+  missingFields?: any[];
+  error?: string;
+  reason?: string;
+};
+
+export type QuoteCheckoutResponse = {
+  ok: boolean;
+  quoteNumber?: string;
+  totalArs?: number;
+  totalUsd?: number;
+  exchangeRate?: number;
+  preferenceId?: string;
+  init_point?: string;
+  sandbox_init_point?: string;
+  external_reference?: string;
+  error?: string;
+  reason?: string;
+  status?: string;
 };
 
 function cleanString(value: any) {
   return String(value || "").trim();
+}
+
+function normalizeQuantity(value: any) {
+  const parsed = Number(value || 1);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(Math.floor(parsed), 3);
 }
 
 function isLikelyUrl(value: string) {
@@ -43,6 +118,40 @@ function isLikelyUrl(value: string) {
   }
 }
 
+async function authedFetch(path: string, options: RequestInit = {}) {
+  const token = await getAuthToken();
+
+  if (!token) {
+    throw new Error("Necesitás iniciar sesión para pedir y ver cotizaciones.");
+  }
+
+  return fetch(buildApiUrl(path), {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+}
+
+async function parseJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  let data: any = {};
+
+  try {
+    data = JSON.parse(text || "{}");
+  } catch {
+    throw new Error(text || "Respuesta inválida del servidor.");
+  }
+
+  if (!response.ok || data?.ok === false) {
+    throw new Error(data?.message || data?.error || "No pudimos completar la operación.");
+  }
+
+  return data as T;
+}
+
 export function normalizeQuoteUrl(value: string) {
   const clean = cleanString(value);
   if (!clean) return "";
@@ -50,66 +159,87 @@ export function normalizeQuoteUrl(value: string) {
 }
 
 export function validateQuoteUrl(value: string) {
-  if (!cleanString(value)) {
-    return "Pegá el link del producto que querés traer de USA.";
-  }
-
-  if (!isLikelyUrl(value)) {
-    return "El link no parece válido. Copiá la URL completa del producto.";
-  }
-
+  if (!cleanString(value)) return "Pegá el link del producto que querés traer de USA.";
+  if (!isLikelyUrl(value)) return "El link no parece válido. Copiá la URL completa del producto.";
   return "";
 }
 
-export async function submitQuoteRequest(
-  payload: QuoteRequestPayload
-): Promise<QuoteRequestResponse> {
-  const token = await getAuthToken();
-  const storedUser = await getStoredUser();
+export async function submitQuoteRequest(payload: QuoteRequestPayload): Promise<QuoteRequestResponse> {
+  const products = Array.isArray(payload.products) && payload.products.length > 0
+    ? payload.products
+    : [{
+        sourceUrl: payload.productUrl || "",
+        productName: payload.productName || "",
+        requestedSize: payload.requestedSize || "",
+        requestedColor: payload.requestedColor || "",
+        customerNotes: payload.comments || "",
+        quantity: payload.quantity || 1,
+      }];
 
-  const productUrl = normalizeQuoteUrl(payload.productUrl);
-  const urlError = validateQuoteUrl(productUrl);
+  const normalizedProducts = products
+    .slice(0, 3)
+    .map((product) => {
+      const sourceUrl = normalizeQuoteUrl(product.sourceUrl);
+      const urlError = validateQuoteUrl(sourceUrl);
+      if (urlError) throw new Error(urlError);
 
-  if (urlError) {
-    throw new Error(urlError);
-  }
+      return {
+        sourceUrl,
+        productName: cleanString(product.productName).slice(0, 300),
+        requestedSize: cleanString(product.requestedSize).slice(0, 120),
+        requestedColor: cleanString(product.requestedColor).slice(0, 120),
+        customerNotes: cleanString(product.customerNotes).slice(0, 3000),
+        quantity: normalizeQuantity(product.quantity),
+      };
+    });
 
-  const contact = cleanString(payload.contact || storedUser?.email || storedUser?.phone || "");
-
-  if (!contact) {
-    throw new Error("Dejanos un email o teléfono para responderte la cotización.");
-  }
-
-  const response = await fetch(buildApiUrl("/api/app/quote"), {
+  const response = await authedFetch("/api/quotes", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify({
-      productUrl,
-      productName: cleanString(payload.productName),
-      store: cleanString(payload.store),
-      quantity: Math.max(1, Number(payload.quantity || 1)),
-      comments: cleanString(payload.comments),
-      contact,
-      urgency: payload.urgency || "normal",
-      source: "app",
+      source: "app_quotes",
+      products: normalizedProducts,
     }),
   });
 
-  const text = await response.text();
-  let data: QuoteRequestResponse;
+  return parseJson<QuoteRequestResponse>(response);
+}
 
-  try {
-    data = JSON.parse(text || "{}");
-  } catch {
-    throw new Error(text || "No pudimos enviar la cotización.");
-  }
+export async function fetchMyQuotes(): Promise<CustomerQuote[]> {
+  const response = await authedFetch("/api/quotes/me", { method: "GET" });
+  const data = await parseJson<{ ok: boolean; quotes: CustomerQuote[] }>(response);
+  return data.quotes || [];
+}
 
-  if (!response.ok || data.ok === false) {
-    throw new Error(data.message || data.error || "No pudimos enviar la cotización.");
-  }
+export async function fetchQuoteDetail(quoteNumber: string): Promise<QuoteProfileResponse> {
+  const response = await authedFetch(`/api/quotes/${encodeURIComponent(quoteNumber)}`, { method: "GET" });
+  return parseJson<QuoteProfileResponse>(response);
+}
 
-  return data;
+export async function completeQuoteProfile(quoteNumber: string): Promise<QuoteProfileResponse> {
+  const response = await authedFetch(`/api/quotes/${encodeURIComponent(quoteNumber)}/complete-profile`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return parseJson<QuoteProfileResponse>(response);
+}
+
+export async function createQuoteCheckout(quoteNumber: string): Promise<QuoteCheckoutResponse> {
+  const response = await authedFetch(`/api/quotes/${encodeURIComponent(quoteNumber)}/checkout`, {
+    method: "POST",
+    body: JSON.stringify({ source: "app" }),
+  });
+  return parseJson<QuoteCheckoutResponse>(response);
+}
+
+export async function openQuoteCheckout(quoteNumber: string) {
+  const checkout = await createQuoteCheckout(quoteNumber);
+  const url = checkout.init_point || checkout.sandbox_init_point;
+
+  if (!url) throw new Error("No recibimos el link de pago de Mercado Pago.");
+
+  const canOpen = await Linking.canOpenURL(url);
+  if (!canOpen) throw new Error("No pudimos abrir Mercado Pago en este dispositivo.");
+
+  await Linking.openURL(url);
+  return checkout;
 }

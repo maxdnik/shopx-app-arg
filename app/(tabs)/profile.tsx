@@ -1281,6 +1281,11 @@ export default function ProfileScreen() {
               <Text style={styles.whatsappButtonText}>Hablar con ShopX</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+              <Feather name="log-out" size={18} color={white} />
+              <Text style={styles.logoutText}>Cerrar sesión</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.deleteAccountButton, deletingAccount && styles.buttonDisabled]}
               onPress={confirmDeleteAccount}
@@ -1290,15 +1295,10 @@ export default function ProfileScreen() {
                 <ActivityIndicator color="#C53030" />
               ) : (
                 <>
-                  <Feather name="trash-2" size={18} color="#C53030" />
+                  <Feather name="trash-2" size={16} color="#C53030" />
                   <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
                 </>
               )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Feather name="log-out" size={18} color={muted} />
-              <Text style={styles.logoutText}>Cerrar sesión</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -2101,37 +2101,41 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   deleteAccountButton: {
-    marginHorizontal: 18,
-    marginTop: 12,
-    minHeight: 48,
-    borderRadius: 18,
-    backgroundColor: "#FFF5F5",
-    borderWidth: 1,
-    borderColor: "#FED7D7",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  deleteAccountText: {
-    color: "#C53030",
-    fontSize: 14,
-    fontWeight: "900",
-  },
-
-  logoutButton: {
-    marginTop: 18,
+    marginTop: 14,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 7,
     paddingVertical: 10,
     paddingHorizontal: 14,
   },
-  logoutText: {
-    color: muted,
+  deleteAccountText: {
+    color: "#C53030",
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  logoutButton: {
+    marginHorizontal: 18,
+    marginTop: 20,
+    minHeight: 56,
+    borderRadius: 999,
+    backgroundColor: navy,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 9,
+    shadowColor: navy,
+    shadowOpacity: 0.13,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 4,
+  },
+  logoutText: {
+    color: white,
+    fontSize: 16,
+    fontWeight: "900",
   },
 
   authCard: {

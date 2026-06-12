@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,9 +16,15 @@ import {
   View,
 } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { getStoredUser } from "../../lib/auth";
 import {
+  CustomerQuote,
+  QuoteProductPayload,
+  completeQuoteProfile,
+  fetchMyQuotes,
   normalizeQuoteUrl,
+  openQuoteCheckout,
   submitQuoteRequest,
   validateQuoteUrl,
 } from "../../lib/quote";
@@ -27,206 +35,241 @@ const text = "#071E35";
 const muted = "#718096";
 const accent = "#18C7D8";
 const soft = "#F7FAFC";
-const softCard = "#F1F5F9";
 const border = "#E2E8F0";
 const white = "#FFFFFF";
 const green = "#0EA371";
 const greenSoft = "#E7FFF4";
 const amber = "#F59E0B";
+const red = "#DC2626";
 
-const urgencyOptions = [
-  { value: "normal", label: "Normal", icon: "clock" as const },
-  { value: "urgent", label: "Lo necesito pronto", icon: "zap" as const },
-  { value: "not_sure", label: "Estoy evaluando", icon: "help-circle" as const },
-];
+const MAX_PRODUCTS = 3;
 
-function detectStoreFromUrl(value: string) {
-  const clean = value.toLowerCase();
+type QuoteFormProduct = QuoteProductPayload & { localId: string };
 
-  if (clean.includes("amazon.")) return "Amazon";
-  if (clean.includes("apple.")) return "Apple";
-  if (clean.includes("nike.")) return "Nike";
-  if (clean.includes("ebay.")) return "eBay";
-  if (clean.includes("bestbuy.")) return "Best Buy";
-  if (clean.includes("yeti.")) return "YETI";
-  if (clean.includes("walmart.")) return "Walmart";
-  if (clean.includes("target.")) return "Target";
-  if (clean.includes("adidas.")) return "Adidas";
+function newProduct(): QuoteFormProduct {
+  return {
+    localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    sourceUrl: "",
+    productName: "",
+    requestedSize: "",
+    requestedColor: "",
+    customerNotes: "",
+    quantity: 1,
+  };
+}
 
-  return "";
+function formatMoney(value?: number, currency = "ARS") {
+  const amount = Number(value || 0);
+  if (!amount) return "—";
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: currency === "ARS" ? 0 : 2,
+  }).format(amount);
+}
+
+function statusTone(status: string) {
+  if (["sent", "ready_to_pay", "payment_pending"].includes(status)) return green;
+  if (["profile_required", "pending_review", "priced"].includes(status)) return amber;
+  if (["expired", "cancelled", "rejected"].includes(status)) return red;
+  return navy;
+}
+
+function getPrimaryCta(quote: CustomerQuote) {
+  if (["sent", "profile_required", "ready_to_pay"].includes(quote.status)) {
+    return "Continuar y pagar";
+  }
+  if (quote.status === "payment_pending") return "Abrir pago";
+  if (quote.status === "pending_review") return "En revisión";
+  if (quote.status === "converted_to_order" || quote.status === "paid") return "Pagada";
+  if (quote.status === "expired") return "Vencida";
+  return quote.statusLabel || quote.status;
 }
 
 export default function QuoteScreen() {
-  const [productUrl, setProductUrl] = useState("");
-  const [productName, setProductName] = useState("");
-  const [store, setStore] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [comments, setComments] = useState("");
-  const [contact, setContact] = useState("");
-  const [urgency, setUrgency] = useState<"normal" | "urgent" | "not_sure">(
-    "normal"
-  );
+  const [products, setProducts] = useState<QuoteFormProduct[]>([newProduct()]);
+  const [quotes, setQuotes] = useState<CustomerQuote[]>([]);
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [quoteNumber, setQuoteNumber] = useState("");
+  const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [submittedNumbers, setSubmittedNumbers] = useState<string[]>([]);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const [payingQuote, setPayingQuote] = useState<string>("");
 
-  useEffect(() => {
-    let mounted = true;
+  const firstUrlError = useMemo(() => {
+    const first = products[0]?.sourceUrl || "";
+    if (!first.trim()) return "";
+    return validateQuoteUrl(first);
+  }, [products]);
 
-    getStoredUser()
-      .then((user) => {
-        if (!mounted || !user) return;
-        setContact(user.email || user.phone || "");
-      })
-      .catch(() => null);
+  const validProducts = useMemo(
+    () => products.filter((product) => product.sourceUrl.trim()),
+    [products]
+  );
 
-    return () => {
-      mounted = false;
-    };
+  const canSubmit = validProducts.length > 0 && !firstUrlError && !loading && isLoggedIn;
+
+  const loadQuotes = useCallback(async (silent = false) => {
+    if (!silent) setLoadingQuotes(true);
+    try {
+      const user = await getStoredUser();
+      setIsLoggedIn(Boolean(user));
+      if (!user) {
+        setQuotes([]);
+        return;
+      }
+      const data = await fetchMyQuotes();
+      setQuotes(data);
+    } catch (error: any) {
+      if (!silent) {
+        Alert.alert("No pudimos cargar tus cotizaciones", error?.message || "Intentá de nuevo.");
+      }
+    } finally {
+      if (!silent) setLoadingQuotes(false);
+    }
   }, []);
 
   useEffect(() => {
-    const detected = detectStoreFromUrl(productUrl);
-    if (detected && !store.trim()) {
-      setStore(detected);
-    }
-  }, [productUrl, store]);
+    loadQuotes(true);
+  }, [loadQuotes]);
 
-  const urlError = useMemo(() => {
-    if (!productUrl.trim()) return "";
-    return validateQuoteUrl(productUrl);
-  }, [productUrl]);
+  function updateProduct(localId: string, patch: Partial<QuoteFormProduct>) {
+    setProducts((current) => current.map((product) => (product.localId === localId ? { ...product, ...patch } : product)));
+  }
 
-  const canSubmit = productUrl.trim() && contact.trim() && !urlError && !loading;
+  function addProduct() {
+    if (products.length >= MAX_PRODUCTS) return;
+    setProducts((current) => [...current, newProduct()]);
+  }
+
+  function removeProduct(localId: string) {
+    setProducts((current) => (current.length === 1 ? current : current.filter((product) => product.localId !== localId)));
+  }
+
+  function resetForm() {
+    setProducts([newProduct()]);
+    setSubmittedNumbers([]);
+  }
 
   async function handleSubmit() {
-    const validationError = validateQuoteUrl(productUrl);
+    const cleanProducts = validProducts.map((product) => ({
+      sourceUrl: normalizeQuoteUrl(product.sourceUrl),
+      productName: product.productName,
+      requestedSize: product.requestedSize,
+      requestedColor: product.requestedColor,
+      customerNotes: product.customerNotes,
+      quantity: product.quantity || 1,
+    }));
 
-    if (validationError) {
-      Alert.alert("Revisá el link", validationError);
+    if (cleanProducts.length === 0) {
+      Alert.alert("Falta el link", "Pegá al menos un link de producto de USA.");
       return;
     }
 
-    if (!contact.trim()) {
-      Alert.alert(
-        "Falta contacto",
-        "Dejanos tu email o teléfono para responderte la cotización."
-      );
-      return;
+    for (const product of cleanProducts) {
+      const error = validateQuoteUrl(product.sourceUrl);
+      if (error) {
+        Alert.alert("Revisá el link", error);
+        return;
+      }
     }
 
     setLoading(true);
-
     try {
-      const data = await submitQuoteRequest({
-        productUrl: normalizeQuoteUrl(productUrl),
-        productName,
-        store,
-        quantity: Number(quantity || 1),
-        comments,
-        contact,
-        urgency,
-      });
-
-      setQuoteNumber(data.quote?.quoteNumber || "");
-      setSubmitted(true);
+      const data = await submitQuoteRequest({ products: cleanProducts });
+      const numbers = (data.quotes || []).map((quote) => quote.quoteNumber).filter(Boolean);
+      setSubmittedNumbers(numbers);
+      await loadQuotes(true);
     } catch (error: any) {
-      Alert.alert(
-        "No pudimos enviar la cotización",
-        error?.message || "Probá de nuevo en unos segundos."
-      );
+      Alert.alert("No pudimos crear la cotización", error?.message || "Probá de nuevo en unos segundos.");
     } finally {
       setLoading(false);
     }
   }
 
-  function resetForm() {
-    setProductUrl("");
-    setProductName("");
-    setStore("");
-    setQuantity("1");
-    setComments("");
-    setUrgency("normal");
-    setSubmitted(false);
-    setQuoteNumber("");
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadQuotes(true);
+    setRefreshing(false);
+  }
+
+  async function handlePayQuote(quote: CustomerQuote) {
+    if (["pending_review", "expired", "paid", "converted_to_order"].includes(quote.status)) return;
+
+    setPayingQuote(quote.quoteNumber);
+    try {
+      if (["sent", "profile_required"].includes(quote.status)) {
+        await completeQuoteProfile(quote.quoteNumber);
+      }
+      await openQuoteCheckout(quote.quoteNumber);
+      await loadQuotes(true);
+    } catch (error: any) {
+      const message = error?.message || "No pudimos continuar con el pago.";
+      if (/faltan datos|perfil|profile/i.test(message)) {
+        Alert.alert(
+          "Faltan datos de cuenta",
+          "Completá tus datos fiscales y dirección en Mi cuenta. Después volvés a esta cotización y pagás.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Ir a Mi cuenta", onPress: () => router.push("/profile") },
+          ]
+        );
+      } else {
+        Alert.alert("No pudimos abrir el pago", message);
+      }
+    } finally {
+      setPayingQuote("");
+    }
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.app}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView
         style={styles.screen}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         <ScreenHeader
           title="Cotizar"
-          subtitle="Pegá cualquier link de USA y recibí precio final estimado puesto en Argentina."
+          subtitle="Mismo flujo que la web: pedís la cotización, ShopX la revisa, la recibís con precio final y la pagás desde tu cuenta."
           icon={<Feather name="link-2" size={24} color={white} />}
         />
 
-        {submitted ? (
+        {isLoggedIn === false ? (
+          <View style={styles.loginCard}>
+            <View style={styles.loginIcon}>
+              <Feather name="lock" size={28} color={navy} />
+            </View>
+            <Text style={styles.loginTitle}>Iniciá sesión para cotizar</Text>
+            <Text style={styles.loginText}>
+              Las cotizaciones ahora quedan asociadas a tu cuenta, igual que en la web. Así podés ver el estado, completar datos y pagar cuando ShopX te envía el precio final.
+            </Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => router.push("/profile")}>
+              <Text style={styles.primaryButtonText}>Ir a Mi cuenta</Text>
+              <Feather name="arrow-right" size={19} color={white} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {submittedNumbers.length > 0 ? (
           <View style={styles.successCard}>
             <View style={styles.successIcon}>
               <Feather name="check" size={34} color={green} />
             </View>
-
             <Text style={styles.successKicker}>Solicitud recibida</Text>
             <Text style={styles.successTitle}>Ya la estamos revisando</Text>
-
             <Text style={styles.successText}>
-              Vamos a validar disponibilidad, precio en origen, peso estimado,
-              impuestos, aduana y logística para responderte con un precio final
-              claro.
+              Creamos {submittedNumbers.length === 1 ? "la cotización" : "las cotizaciones"} {submittedNumbers.join(", ")}. Cuando esté lista, la vas a ver abajo con precio final y botón de pago.
             </Text>
-
-            <View style={styles.successSummary}>
-              {!!quoteNumber && (
-                <>
-                  <View>
-                    <Text style={styles.summaryLabel}>Número de solicitud</Text>
-                    <Text style={styles.summaryValue}>{quoteNumber}</Text>
-                  </View>
-                  <View style={styles.summaryDivider} />
-                </>
-              )}
-
-              <View>
-                <Text style={styles.summaryLabel}>Link</Text>
-                <Text style={styles.summaryValue} numberOfLines={2}>
-                  {productUrl}
-                </Text>
-              </View>
-
-              <View style={styles.summaryDivider} />
-
-              <View>
-                <Text style={styles.summaryLabel}>Contacto</Text>
-                <Text style={styles.summaryValue} numberOfLines={2}>
-                  {contact}
-                </Text>
-              </View>
-            </View>
-
             <View style={styles.nextStepsCard}>
-              <Text style={styles.nextStepsTitle}>Qué pasa ahora</Text>
-              <View style={styles.nextStepRow}>
-                <View style={styles.nextStepDot} />
-                <Text style={styles.nextStepText}>Revisamos el producto y disponibilidad.</Text>
-              </View>
-              <View style={styles.nextStepRow}>
-                <View style={styles.nextStepDotMuted} />
-                <Text style={styles.nextStepText}>Calculamos precio final Argentina.</Text>
-              </View>
-              <View style={styles.nextStepRow}>
-                <View style={styles.nextStepDotMuted} />
-                <Text style={styles.nextStepText}>Te respondemos con próximos pasos.</Text>
-              </View>
+              <Text style={styles.nextStepsTitle}>Flujo web aplicado en app</Text>
+              <Step active label="Solicitud creada" />
+              <Step label="ShopX carga precio final" />
+              <Step label="Completás datos si faltan" />
+              <Step label="Pagás la cotización" />
             </View>
-
             <TouchableOpacity style={styles.primaryButton} onPress={resetForm}>
               <Text style={styles.primaryButtonText}>Cotizar otro producto</Text>
             </TouchableOpacity>
@@ -235,14 +278,10 @@ export default function QuoteScreen() {
           <>
             <View style={styles.heroCard}>
               <View style={styles.heroTextBlock}>
-                <Text style={styles.heroKicker}>SHOPX LINK REQUEST</Text>
+                <Text style={styles.heroKicker}>SHOPX QUOTES</Text>
                 <Text style={styles.heroTitle}>Traé cualquier producto de USA</Text>
-                <Text style={styles.heroText}>
-                  Pegá el link. ShopX analiza la compra y te devuelve un precio
-                  final estimado para recibirlo en Argentina.
-                </Text>
+                <Text style={styles.heroText}>Pegá hasta {MAX_PRODUCTS} links. ShopX valida disponibilidad, impuestos, aduana, flete y logística local.</Text>
               </View>
-
               <View style={styles.heroBadge}>
                 <Text style={styles.heroBadgeText}>USA</Text>
                 <Text style={styles.heroBadgeSub}>AR</Text>
@@ -250,759 +289,295 @@ export default function QuoteScreen() {
             </View>
 
             <View style={styles.flowCard}>
-              <View style={styles.flowItem}>
-                <View style={styles.flowIcon}>
-                  <Text style={styles.flowNumber}>1</Text>
-                </View>
-                <Text style={styles.flowText}>Pegás el link</Text>
-              </View>
+              <FlowItem number="1" label="Pedís" />
               <View style={styles.flowLine} />
-              <View style={styles.flowItem}>
-                <View style={styles.flowIcon}>
-                  <Text style={styles.flowNumber}>2</Text>
-                </View>
-                <Text style={styles.flowText}>Calculamos final</Text>
-              </View>
+              <FlowItem number="2" label="Recibís precio" />
               <View style={styles.flowLine} />
-              <View style={styles.flowItem}>
-                <View style={styles.flowIcon}>
-                  <Text style={styles.flowNumber}>3</Text>
-                </View>
-                <Text style={styles.flowText}>Te respondemos</Text>
-              </View>
+              <FlowItem number="3" label="Pagás" />
             </View>
 
             <View style={styles.mainCard}>
               <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="link-2" size={20} color={navy} />
-                </View>
-
+                <View style={styles.cardIcon}><Feather name="link-2" size={20} color={navy} /></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Link del producto</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Copiá la URL completa de la tienda de USA
-                  </Text>
+                  <Text style={styles.sectionTitle}>Links a cotizar</Text>
+                  <Text style={styles.sectionSubtitle}>Talle, color y comentarios son opcionales.</Text>
                 </View>
               </View>
 
-              <TextInput
-                value={productUrl}
-                onChangeText={setProductUrl}
-                placeholder="https://www.amazon.com/..."
-                placeholderTextColor="#8FA0B6"
-                style={[styles.linkInput, urlError ? styles.inputError : null]}
-                multiline
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-              />
+              {products.map((product, index) => (
+                <View key={product.localId} style={styles.productBox}>
+                  <View style={styles.productHeader}>
+                    <Text style={styles.productTitle}>Producto {index + 1}</Text>
+                    {products.length > 1 ? (
+                      <TouchableOpacity onPress={() => removeProduct(product.localId)}>
+                        <Feather name="trash-2" size={18} color={red} />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
 
-              {!!urlError && <Text style={styles.errorText}>{urlError}</Text>}
+                  <TextInput
+                    value={product.sourceUrl}
+                    onChangeText={(value) => updateProduct(product.localId, { sourceUrl: value })}
+                    placeholder="https://www.amazon.com/..."
+                    placeholderTextColor="#8FA0B6"
+                    style={[styles.linkInput, index === 0 && firstUrlError ? styles.inputError : null]}
+                    multiline
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                  />
+                  {index === 0 && !!firstUrlError ? <Text style={styles.errorText}>{firstUrlError}</Text> : null}
 
-              <Text style={styles.helperText}>
-                Puede ser Amazon, Apple, Nike, eBay, Best Buy, StockX, YETI o
-                cualquier tienda de USA.
-              </Text>
-            </View>
+                  <TextInput
+                    value={product.productName}
+                    onChangeText={(value) => updateProduct(product.localId, { productName: value })}
+                    placeholder="Nombre/modelo opcional"
+                    placeholderTextColor="#8FA0B6"
+                    style={styles.contactInput}
+                  />
 
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="shopping-bag" size={20} color={navy} />
+                  <View style={styles.rowInputs}>
+                    <TextInput
+                      value={product.requestedSize}
+                      onChangeText={(value) => updateProduct(product.localId, { requestedSize: value })}
+                      placeholder="Talle"
+                      placeholderTextColor="#8FA0B6"
+                      style={styles.smallInput}
+                    />
+                    <TextInput
+                      value={product.requestedColor}
+                      onChangeText={(value) => updateProduct(product.localId, { requestedColor: value })}
+                      placeholder="Color"
+                      placeholderTextColor="#8FA0B6"
+                      style={styles.smallInput}
+                    />
+                    <TextInput
+                      value={String(product.quantity || 1)}
+                      onChangeText={(value) => updateProduct(product.localId, { quantity: Number(value || 1) })}
+                      placeholder="Cant."
+                      placeholderTextColor="#8FA0B6"
+                      style={[styles.smallInput, { flex: 0.7 }]}
+                      keyboardType="number-pad"
+                    />
+                  </View>
+
+                  <TextInput
+                    value={product.customerNotes}
+                    onChangeText={(value) => updateProduct(product.localId, { customerNotes: value })}
+                    placeholder="Comentarios: versión exacta, medidas, si aceptás alternativas, etc."
+                    placeholderTextColor="#8FA0B6"
+                    style={styles.commentsInput}
+                    multiline
+                  />
                 </View>
+              ))}
 
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Datos útiles opcionales</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    La tienda, el modelo y los comentarios no son obligatorios.
-                  </Text>
-                </View>
-              </View>
-
-              <TextInput
-                value={productName}
-                onChangeText={setProductName}
-                placeholder="Nombre/modelo del producto"
-                placeholderTextColor="#8FA0B6"
-                style={styles.contactInput}
-              />
-
-              <View style={styles.rowInputs}>
-                <TextInput
-                  value={store}
-                  onChangeText={setStore}
-                  placeholder="Tienda (opcional)"
-                  placeholderTextColor="#8FA0B6"
-                  style={[styles.smallInput, { flex: 1.45 }]}
-                />
-                <TextInput
-                  value={quantity}
-                  onChangeText={setQuantity}
-                  placeholder="Cant."
-                  placeholderTextColor="#8FA0B6"
-                  style={[styles.smallInput, { flex: 0.55 }]}
-                  keyboardType="number-pad"
-                />
-              </View>
-
-              <Text style={styles.optionalHint}>
-                Si no sabés la tienda, dejalo vacío. Con el link alcanza para pedir la cotización.
-              </Text>
-            </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="message-square" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Comentarios</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Talle, color, modelo exacto o urgencia
-                  </Text>
-                </View>
-              </View>
-
-              <TextInput
-                value={comments}
-                onChangeText={setComments}
-                placeholder="Ej: talle M, color negro, versión 256GB, envío sin apuro..."
-                placeholderTextColor="#8FA0B6"
-                style={styles.commentsInput}
-                multiline
-              />
-            </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="user" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Contacto</Text>
-                  <Text style={styles.sectionSubtitle}>Dónde te respondemos</Text>
-                </View>
-              </View>
-
-              <TextInput
-                value={contact}
-                onChangeText={setContact}
-                placeholder="Email o teléfono"
-                placeholderTextColor="#8FA0B6"
-                style={styles.contactInput}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="clock" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Prioridad</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Ayuda a ordenar la respuesta
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.urgencyGrid}>
-                {urgencyOptions.map((option) => {
-                  const active = option.value === urgency;
-                  return (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={[styles.urgencyChip, active && styles.urgencyChipActive]}
-                      onPress={() => setUrgency(option.value as any)}
-                    >
-                      <Feather
-                        name={option.icon}
-                        size={15}
-                        color={active ? white : navy}
-                      />
-                      <Text
-                        style={[
-                          styles.urgencyText,
-                          active && styles.urgencyTextActive,
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, products.length >= MAX_PRODUCTS && styles.disabledLight]}
+                  onPress={addProduct}
+                  disabled={products.length >= MAX_PRODUCTS}
+                >
+                  <Feather name="plus" size={18} color={navy} />
+                  <Text style={styles.secondaryButtonText}>Agregar producto</Text>
+                </TouchableOpacity>
               </View>
             </View>
 
             <View style={styles.trustCard}>
               <View style={styles.trustHeader}>
                 <View style={styles.trustIconBig}>
-                  <MaterialCommunityIcons
-                    name="shield-check-outline"
-                    size={25}
-                    color={white}
-                  />
+                  <MaterialCommunityIcons name="shield-check-outline" size={25} color={white} />
                 </View>
-
                 <View style={{ flex: 1 }}>
                   <Text style={styles.trustTitle}>Qué incluye la cotización</Text>
-                  <Text style={styles.trustSubtitle}>
-                    Pensado para evitar sorpresas antes de comprar.
-                  </Text>
+                  <Text style={styles.trustSubtitle}>El mismo desglose operativo de la web.</Text>
                 </View>
               </View>
-
-              <View style={styles.trustList}>
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Precio final estimado en Argentina</Text>
-                </View>
-
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Producto, impuestos, aduana y tasas</Text>
-                </View>
-
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Logística internacional y entrega local</Text>
-                </View>
-
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Acompañamiento ShopX hasta la entrega</Text>
-                </View>
-              </View>
+              <TrustItem label="Precio producto USA y disponibilidad" />
+              <TrustItem label="IVA importación, aduana y tasas" />
+              <TrustItem label="Flete internacional y logística nacional" />
+              <TrustItem label="Gestión ShopX hasta entrega" />
             </View>
 
-            <TouchableOpacity
-              style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
-              onPress={handleSubmit}
-              disabled={!canSubmit}
-            >
-              {loading ? (
-                <ActivityIndicator color={white} />
-              ) : (
-                <>
-                  <Text style={styles.submitButtonText}>Solicitar cotización</Text>
-                  <Feather name="arrow-right" size={20} color={white} />
-                </>
-              )}
+            <TouchableOpacity style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={!canSubmit}>
+              {loading ? <ActivityIndicator color={white} /> : <><Text style={styles.submitButtonText}>Solicitar cotización</Text><Feather name="arrow-right" size={20} color={white} /></>}
             </TouchableOpacity>
-
-            <Text style={styles.legalText}>
-              La cotización puede variar según disponibilidad, precio en origen,
-              peso, medidas y condiciones logísticas al momento de la compra.
-            </Text>
           </>
         )}
 
+        <View style={styles.quotesHeader}>
+          <View>
+            <Text style={styles.myQuotesTitle}>Mis cotizaciones</Text>
+            <Text style={styles.myQuotesSubtitle}>Estado, precio final y pago.</Text>
+          </View>
+          <TouchableOpacity style={styles.refreshButton} onPress={() => loadQuotes(false)}>
+            <Feather name="refresh-cw" size={17} color={navy} />
+          </TouchableOpacity>
+        </View>
+
+        {loadingQuotes ? <ActivityIndicator color={navy} style={{ marginTop: 18 }} /> : null}
+
+        {!loadingQuotes && quotes.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Todavía no tenés cotizaciones</Text>
+            <Text style={styles.emptyText}>Cuando pidas una, aparece acá igual que en el portal web.</Text>
+          </View>
+        ) : null}
+
+        {quotes.map((quote) => (
+          <View key={quote.id || quote.quoteNumber} style={styles.quoteCard}>
+            <View style={styles.quoteTopRow}>
+              {quote.productImage ? <Image source={{ uri: quote.productImage }} style={styles.quoteImage} /> : <View style={styles.quoteImageFallback}><Feather name="package" size={22} color={navy} /></View>}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.quoteNumber}>{quote.quoteNumber}</Text>
+                <Text style={styles.quoteName} numberOfLines={2}>{quote.productTitle || quote.sourceUrl}</Text>
+                <Text style={[styles.statusPill, { color: statusTone(quote.status) }]}>{quote.statusLabel || quote.status}</Text>
+              </View>
+            </View>
+
+            <View style={styles.quoteMetaGrid}>
+              <Meta label="Cantidad" value={String(quote.requestedQuantity || 1)} />
+              <Meta label="Talle" value={quote.requestedSize || "—"} />
+              <Meta label="Color" value={quote.requestedColor || "—"} />
+            </View>
+
+            {quote.pricing ? (
+              <View style={styles.priceBox}>
+                <Text style={styles.priceLabel}>Total final</Text>
+                <Text style={styles.priceArs}>{formatMoney(quote.pricing.totalArs, "ARS")}</Text>
+                <Text style={styles.priceUsd}>{formatMoney(quote.pricing.totalUsd, "USD")} · TC {Number(quote.pricing.exchangeRate || 0).toFixed(0)}</Text>
+              </View>
+            ) : (
+              <View style={styles.pendingBox}>
+                <Feather name="clock" size={17} color={amber} />
+                <Text style={styles.pendingText}>ShopX está revisando precio, peso, impuestos y logística.</Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[styles.quoteButton, ["pending_review", "expired", "paid", "converted_to_order"].includes(quote.status) && styles.quoteButtonDisabled]}
+              onPress={() => handlePayQuote(quote)}
+              disabled={Boolean(payingQuote) || ["pending_review", "expired", "paid", "converted_to_order"].includes(quote.status)}
+            >
+              {payingQuote === quote.quoteNumber ? <ActivityIndicator color={white} /> : <Text style={styles.quoteButtonText}>{getPrimaryCta(quote)}</Text>}
+            </TouchableOpacity>
+          </View>
+        ))}
+
         <View style={{ height: 130 }} />
       </ScrollView>
-
       <AppBottomNav />
     </KeyboardAvoidingView>
   );
 }
 
+function FlowItem({ number, label }: { number: string; label: string }) {
+  return <View style={styles.flowItem}><View style={styles.flowIcon}><Text style={styles.flowNumber}>{number}</Text></View><Text style={styles.flowText}>{label}</Text></View>;
+}
+
+function Step({ label, active }: { label: string; active?: boolean }) {
+  return <View style={styles.nextStepRow}><View style={active ? styles.nextStepDot : styles.nextStepDotMuted} /><Text style={styles.nextStepText}>{label}</Text></View>;
+}
+
+function TrustItem({ label }: { label: string }) {
+  return <View style={styles.trustItem}><Feather name="check-circle" size={18} color={accent} /><Text style={styles.trustText}>{label}</Text></View>;
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return <View style={styles.metaItem}><Text style={styles.metaLabel}>{label}</Text><Text style={styles.metaValue} numberOfLines={1}>{value}</Text></View>;
+}
+
 const styles = StyleSheet.create({
-  app: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-  content: {
-    paddingHorizontal: 18,
-    paddingBottom: 0,
-  },
-
-  heroCard: {
-    borderRadius: 30,
-    backgroundColor: navyDark,
-    padding: 18,
-    marginBottom: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  heroTextBlock: {
-    flex: 1,
-  },
-  heroKicker: {
-    color: accent,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-  },
-  heroTitle: {
-    color: white,
-    fontSize: 23,
-    fontWeight: "900",
-    marginTop: 6,
-    letterSpacing: -0.8,
-    lineHeight: 28,
-  },
-  heroText: {
-    color: "rgba(255,255,255,0.74)",
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-    marginTop: 7,
-  },
-  heroBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-  },
-  heroBadgeText: {
-    color: white,
-    fontSize: 17,
-    fontWeight: "900",
-    letterSpacing: -0.4,
-  },
-  heroBadgeSub: {
-    color: accent,
-    fontSize: 11,
-    fontWeight: "900",
-    marginTop: -2,
-  },
-
-  flowCard: {
-    borderRadius: 24,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 14,
-    marginBottom: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.035,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 1,
-  },
-  flowItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-  flowIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 6,
-  },
-  flowNumber: {
-    color: navy,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  flowText: {
-    color: text,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  flowLine: {
-    width: 18,
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: "#DCE7F2",
-    marginHorizontal: 2,
-  },
-
-  mainCard: {
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: white,
-    padding: 16,
-    marginBottom: 14,
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
-  sectionCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: white,
-    padding: 16,
-    marginBottom: 14,
-    shadowColor: navy,
-    shadowOpacity: 0.035,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 1,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 14,
-  },
-  cardIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sectionTitle: {
-    color: text,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  sectionSubtitle: {
-    color: muted,
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 3,
-  },
-
-  linkInput: {
-    minHeight: 108,
-    borderRadius: 20,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: text,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlignVertical: "top",
-    fontWeight: "600",
-  },
-  inputError: {
-    borderColor: "#EF4444",
-    backgroundColor: "#FFF7F7",
-  },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "800",
-    marginTop: 9,
-  },
-  commentsInput: {
-    minHeight: 116,
-    borderRadius: 20,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: text,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlignVertical: "top",
-    fontWeight: "600",
-  },
-  contactInput: {
-    minHeight: 52,
-    borderRadius: 18,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    color: text,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  rowInputs: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 10,
-  },
-  smallInput: {
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    color: text,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  helperText: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 11,
-    fontWeight: "600",
-  },
-  optionalHint: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
-    fontWeight: "600",
-  },
-  urgencyGrid: {
-    gap: 9,
-  },
-  urgencyChip: {
-    minHeight: 48,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: softCard,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 9,
-  },
-  urgencyChipActive: {
-    backgroundColor: navy,
-    borderColor: navy,
-  },
-  urgencyText: {
-    color: text,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  urgencyTextActive: {
-    color: white,
-  },
-
-  trustCard: {
-    borderRadius: 28,
-    backgroundColor: navy,
-    padding: 18,
-    marginBottom: 18,
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  trustHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
-  },
-  trustIconBig: {
-    width: 48,
-    height: 48,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  trustTitle: {
-    color: white,
-    fontSize: 19,
-    lineHeight: 24,
-    fontWeight: "900",
-  },
-  trustSubtitle: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 3,
-  },
-  trustList: {
-    gap: 12,
-  },
-  trustItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  trustText: {
-    flex: 1,
-    color: "#D7E2EF",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-  },
-
-  submitButton: {
-    backgroundColor: navy,
-    borderRadius: 999,
-    minHeight: 56,
-    paddingHorizontal: 18,
-    paddingVertical: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 9,
-    marginBottom: 14,
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 4,
-  },
-  submitButtonDisabled: {
-    opacity: 0.48,
-  },
-  submitButtonText: {
-    color: white,
-    fontSize: 16,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  legalText: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 19,
-    textAlign: "center",
-    paddingHorizontal: 8,
-    fontWeight: "500",
-  },
-
-  successCard: {
-    borderRadius: 30,
-    backgroundColor: navy,
-    padding: 22,
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  successIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: greenSoft,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  successKicker: {
-    color: accent,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-    marginBottom: 6,
-  },
-  successTitle: {
-    color: white,
-    fontSize: 27,
-    lineHeight: 33,
-    fontWeight: "900",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  successText: {
-    color: "#D7E2EF",
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-    marginBottom: 20,
-    fontWeight: "600",
-  },
-  successSummary: {
-    width: "100%",
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    padding: 18,
-    marginBottom: 14,
-  },
-  summaryLabel: {
-    color: "#9FB1C8",
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-    marginBottom: 5,
-    textTransform: "uppercase",
-  },
-  summaryValue: {
-    color: white,
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: "900",
-  },
-  summaryDivider: {
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    marginVertical: 14,
-  },
-  nextStepsCard: {
-    width: "100%",
-    borderRadius: 22,
-    backgroundColor: "rgba(24,199,216,0.11)",
-    borderWidth: 1,
-    borderColor: "rgba(24,199,216,0.22)",
-    padding: 16,
-    marginBottom: 16,
-  },
-  nextStepsTitle: {
-    color: white,
-    fontSize: 15,
-    fontWeight: "900",
-    marginBottom: 11,
-  },
-  nextStepRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 9,
-  },
-  nextStepDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: accent,
-  },
-  nextStepDotMuted: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: "rgba(255,255,255,0.32)",
-  },
-  nextStepText: {
-    flex: 1,
-    color: "#D7E2EF",
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  primaryButton: {
-    width: "100%",
-    backgroundColor: white,
-    borderRadius: 999,
-    paddingVertical: 16,
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    color: navy,
-    fontSize: 15,
-    fontWeight: "900",
-  },
+  app: { flex: 1, backgroundColor: soft },
+  screen: { flex: 1, backgroundColor: soft },
+  content: { paddingHorizontal: 18, paddingBottom: 0 },
+  heroCard: { borderRadius: 30, backgroundColor: navyDark, padding: 18, marginBottom: 14, flexDirection: "row", alignItems: "center", shadowColor: navy, shadowOpacity: 0.13, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
+  heroTextBlock: { flex: 1 },
+  heroKicker: { color: accent, fontSize: 11, fontWeight: "900", letterSpacing: 1.5 },
+  heroTitle: { color: white, fontSize: 23, fontWeight: "900", marginTop: 6, letterSpacing: -0.8, lineHeight: 28 },
+  heroText: { color: "rgba(255,255,255,0.74)", fontSize: 13, lineHeight: 19, fontWeight: "600", marginTop: 7 },
+  heroBadge: { width: 64, height: 64, borderRadius: 24, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", marginLeft: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.16)" },
+  heroBadgeText: { color: white, fontSize: 17, fontWeight: "900" },
+  heroBadgeSub: { color: accent, fontSize: 11, fontWeight: "900", marginTop: -2 },
+  flowCard: { borderRadius: 24, backgroundColor: white, borderWidth: 1, borderColor: border, padding: 14, marginBottom: 14, flexDirection: "row", alignItems: "center" },
+  flowItem: { flex: 1, alignItems: "center" },
+  flowIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#EAFBFD", alignItems: "center", justifyContent: "center", marginBottom: 6 },
+  flowNumber: { color: navy, fontSize: 12, fontWeight: "900" },
+  flowText: { color: text, fontSize: 11, fontWeight: "800", textAlign: "center" },
+  flowLine: { width: 22, height: 1, backgroundColor: border },
+  mainCard: { borderRadius: 28, backgroundColor: white, borderWidth: 1, borderColor: border, padding: 16, marginBottom: 14 },
+  cardHeader: { flexDirection: "row", gap: 12, alignItems: "center", marginBottom: 14 },
+  cardIcon: { width: 40, height: 40, borderRadius: 16, backgroundColor: "#EAFBFD", alignItems: "center", justifyContent: "center" },
+  sectionTitle: { color: text, fontSize: 17, fontWeight: "900", letterSpacing: -0.3 },
+  sectionSubtitle: { color: muted, fontSize: 12, fontWeight: "600", marginTop: 2, lineHeight: 17 },
+  productBox: { borderRadius: 22, borderWidth: 1, borderColor: border, backgroundColor: "#FBFDFF", padding: 12, marginBottom: 12 },
+  productHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  productTitle: { color: navy, fontSize: 13, fontWeight: "900" },
+  linkInput: { minHeight: 72, borderRadius: 18, backgroundColor: white, borderWidth: 1.5, borderColor: border, paddingHorizontal: 14, paddingVertical: 12, color: text, fontSize: 14, fontWeight: "700", textAlignVertical: "top", marginBottom: 10 },
+  inputError: { borderColor: "#F87171", backgroundColor: "#FFF7F7" },
+  errorText: { color: red, fontSize: 12, fontWeight: "700", marginBottom: 8 },
+  rowInputs: { flexDirection: "row", gap: 9, marginBottom: 10 },
+  smallInput: { flex: 1, height: 48, borderRadius: 16, backgroundColor: white, borderWidth: 1, borderColor: border, paddingHorizontal: 12, color: text, fontSize: 13, fontWeight: "700" },
+  contactInput: { height: 50, borderRadius: 16, backgroundColor: white, borderWidth: 1, borderColor: border, paddingHorizontal: 14, color: text, fontSize: 14, fontWeight: "700", marginBottom: 10 },
+  commentsInput: { minHeight: 76, borderRadius: 16, backgroundColor: white, borderWidth: 1, borderColor: border, paddingHorizontal: 14, paddingVertical: 12, color: text, fontSize: 13, fontWeight: "700", textAlignVertical: "top" },
+  actionsRow: { flexDirection: "row", justifyContent: "flex-start" },
+  secondaryButton: { height: 44, borderRadius: 16, backgroundColor: "#EAFBFD", paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+  secondaryButtonText: { color: navy, fontSize: 13, fontWeight: "900" },
+  disabledLight: { opacity: 0.45 },
+  trustCard: { borderRadius: 26, backgroundColor: navy, padding: 16, marginBottom: 14 },
+  trustHeader: { flexDirection: "row", gap: 12, alignItems: "center", marginBottom: 12 },
+  trustIconBig: { width: 44, height: 44, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center" },
+  trustTitle: { color: white, fontSize: 16, fontWeight: "900" },
+  trustSubtitle: { color: "rgba(255,255,255,0.68)", fontSize: 12, fontWeight: "600", marginTop: 2 },
+  trustItem: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
+  trustText: { color: white, fontSize: 13, fontWeight: "700", flex: 1 },
+  submitButton: { height: 58, borderRadius: 20, backgroundColor: navy, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10, marginBottom: 14 },
+  submitButtonDisabled: { opacity: 0.45 },
+  submitButtonText: { color: white, fontSize: 16, fontWeight: "900" },
+  primaryButton: { height: 54, borderRadius: 18, backgroundColor: navy, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10, marginTop: 16 },
+  primaryButtonText: { color: white, fontSize: 15, fontWeight: "900" },
+  loginCard: { borderRadius: 28, backgroundColor: white, borderWidth: 1, borderColor: border, padding: 18, marginBottom: 14, alignItems: "center" },
+  loginIcon: { width: 58, height: 58, borderRadius: 23, backgroundColor: "#EAFBFD", alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  loginTitle: { color: text, fontSize: 20, fontWeight: "900", textAlign: "center" },
+  loginText: { color: muted, fontSize: 13, fontWeight: "600", lineHeight: 20, textAlign: "center", marginTop: 8 },
+  successCard: { borderRadius: 30, backgroundColor: white, borderWidth: 1, borderColor: border, padding: 18, marginBottom: 14, alignItems: "center" },
+  successIcon: { width: 72, height: 72, borderRadius: 28, backgroundColor: greenSoft, alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  successKicker: { color: green, fontSize: 12, fontWeight: "900", letterSpacing: 1.3 },
+  successTitle: { color: text, fontSize: 23, fontWeight: "900", marginTop: 4, textAlign: "center" },
+  successText: { color: muted, fontSize: 14, fontWeight: "600", lineHeight: 21, textAlign: "center", marginTop: 8 },
+  nextStepsCard: { width: "100%", borderRadius: 22, backgroundColor: soft, borderWidth: 1, borderColor: border, padding: 14, marginTop: 16 },
+  nextStepsTitle: { color: text, fontSize: 14, fontWeight: "900", marginBottom: 8 },
+  nextStepRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
+  nextStepDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: green },
+  nextStepDotMuted: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#CBD5E1" },
+  nextStepText: { color: text, fontSize: 13, fontWeight: "700", flex: 1 },
+  quotesHeader: { marginTop: 12, marginBottom: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  myQuotesTitle: { color: text, fontSize: 20, fontWeight: "900", letterSpacing: -0.5 },
+  myQuotesSubtitle: { color: muted, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  refreshButton: { width: 42, height: 42, borderRadius: 16, backgroundColor: white, borderWidth: 1, borderColor: border, alignItems: "center", justifyContent: "center" },
+  emptyCard: { borderRadius: 24, backgroundColor: white, borderWidth: 1, borderColor: border, padding: 18, marginBottom: 12 },
+  emptyTitle: { color: text, fontSize: 16, fontWeight: "900" },
+  emptyText: { color: muted, fontSize: 13, fontWeight: "600", lineHeight: 19, marginTop: 4 },
+  quoteCard: { borderRadius: 26, backgroundColor: white, borderWidth: 1, borderColor: border, padding: 14, marginBottom: 12 },
+  quoteTopRow: { flexDirection: "row", gap: 12, alignItems: "center" },
+  quoteImage: { width: 58, height: 58, borderRadius: 18, backgroundColor: soft },
+  quoteImageFallback: { width: 58, height: 58, borderRadius: 18, backgroundColor: "#EAFBFD", alignItems: "center", justifyContent: "center" },
+  quoteNumber: { color: navy, fontSize: 12, fontWeight: "900", letterSpacing: 0.6 },
+  quoteName: { color: text, fontSize: 15, fontWeight: "900", marginTop: 2, lineHeight: 19 },
+  statusPill: { fontSize: 12, fontWeight: "900", marginTop: 5 },
+  quoteMetaGrid: { flexDirection: "row", gap: 8, marginTop: 12 },
+  metaItem: { flex: 1, borderRadius: 14, backgroundColor: soft, padding: 10 },
+  metaLabel: { color: muted, fontSize: 10, fontWeight: "900", textTransform: "uppercase" },
+  metaValue: { color: text, fontSize: 13, fontWeight: "900", marginTop: 3 },
+  priceBox: { borderRadius: 18, backgroundColor: greenSoft, padding: 12, marginTop: 12 },
+  priceLabel: { color: green, fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
+  priceArs: { color: text, fontSize: 22, fontWeight: "900", marginTop: 2 },
+  priceUsd: { color: muted, fontSize: 12, fontWeight: "800", marginTop: 2 },
+  pendingBox: { borderRadius: 18, backgroundColor: "#FFF7E6", padding: 12, marginTop: 12, flexDirection: "row", alignItems: "center", gap: 9 },
+  pendingText: { color: "#8A5A00", fontSize: 12, fontWeight: "800", flex: 1, lineHeight: 17 },
+  quoteButton: { height: 48, borderRadius: 17, backgroundColor: navy, alignItems: "center", justifyContent: "center", marginTop: 12 },
+  quoteButtonDisabled: { backgroundColor: "#94A3B8" },
+  quoteButtonText: { color: white, fontSize: 14, fontWeight: "900" },
 });
