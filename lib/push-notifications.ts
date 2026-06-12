@@ -29,39 +29,24 @@ Notifications.setNotificationHandler({
 });
 
 function getExpoProjectId() {
-  const projectId =
+  return String(
     Constants.expoConfig?.extra?.eas?.projectId ||
-    Constants.easConfig?.projectId ||
-    "";
-
-  return String(projectId || "");
+      Constants.easConfig?.projectId ||
+      ""
+  );
 }
 
 function getNotificationRoute(data?: Record<string, any>) {
   const actionRoute = String(data?.actionRoute || "").trim();
-
-  if (actionRoute) {
-    return actionRoute;
-  }
+  if (actionRoute) return actionRoute;
 
   const orderId = String(data?.orderId || "").trim();
   const notificationType = String(data?.type || "").trim();
 
-  if (orderId) {
-    return `/order/${orderId}`;
-  }
-
-  if (notificationType === "order") {
-    return "/orders";
-  }
-
-  if (notificationType === "favorite") {
-    return "/favorites";
-  }
-
-  if (notificationType === "cart") {
-    return "/cart";
-  }
+  if (orderId) return `/order/${orderId}`;
+  if (notificationType === "order") return "/orders";
+  if (notificationType === "favorite") return "/favorites";
+  if (notificationType === "cart") return "/cart";
 
   return "/notifications";
 }
@@ -69,33 +54,10 @@ function getNotificationRoute(data?: Record<string, any>) {
 export function navigateFromPushNotification(data?: Record<string, any>) {
   try {
     const route = getNotificationRoute(data);
-
-    setTimeout(() => {
-      router.push(route as any);
-    }, 250);
+    setTimeout(() => router.push(route as any), 250);
   } catch (error) {
     console.log("ERROR NAVIGATE FROM PUSH:", error);
   }
-}
-
-async function getNotificationPermissionStatus() {
-  const currentPermissions = await Notifications.getPermissionsAsync();
-
-  if (
-    currentPermissions.status === "granted" ||
-    currentPermissions.ios?.status ===
-      Notifications.IosAuthorizationStatus.PROVISIONAL
-  ) {
-    return currentPermissions;
-  }
-
-  return Notifications.requestPermissionsAsync({
-    ios: {
-      allowAlert: true,
-      allowBadge: true,
-      allowSound: true,
-    },
-  });
 }
 
 async function configureAndroidNotificationChannel() {
@@ -140,7 +102,6 @@ async function savePushTokenToBackend(expoPushToken: string) {
   const text = await response.text();
 
   let data: any = {};
-
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
@@ -167,7 +128,7 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
       return {
         success: false,
         reason:
-          "Las push notifications requieren un dispositivo físico. No funcionan correctamente en simulador.",
+          "Las notificaciones requieren un dispositivo físico. No funcionan correctamente en simulador.",
       };
     }
 
@@ -181,16 +142,18 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
       };
     }
 
-    const permissions = await getNotificationPermissionStatus();
+    const permissions = await Notifications.getPermissionsAsync();
 
     const permissionGranted =
       permissions.status === "granted" ||
-      permissions.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+      permissions.ios?.status ===
+        Notifications.IosAuthorizationStatus.PROVISIONAL;
 
     if (!permissionGranted) {
       return {
         success: false,
-        reason: "El usuario no aceptó permisos de notificaciones.",
+        reason:
+          "Permiso de notificaciones no solicitado automáticamente para cumplir App Review.",
       };
     }
 
@@ -255,16 +218,16 @@ export function addPushNotificationListeners() {
 }
 
 export async function setupPushNotifications() {
-  const registration = await registerForPushNotificationsAsync();
-
-  if (!registration.success) {
-    console.log("PUSH NOT REGISTERED:", registration.reason);
-  }
+  await configureAndroidNotificationChannel();
 
   const removeListeners = addPushNotificationListeners();
 
   return {
-    registration,
+    registration: {
+      success: false,
+      reason:
+        "Solicitud automática de permisos desactivada para cumplir App Review.",
+    },
     removeListeners,
   };
 }
@@ -275,12 +238,7 @@ export async function getLastPushNotificationResponse() {
 
     if (!response) return null;
 
-    const data = response.notification.request.content.data as Record<
-      string,
-      any
-    >;
-
-    return data;
+    return response.notification.request.content.data as Record<string, any>;
   } catch (error) {
     console.log("ERROR GET LAST PUSH RESPONSE:", error);
     return null;
