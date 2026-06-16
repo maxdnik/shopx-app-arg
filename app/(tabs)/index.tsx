@@ -318,11 +318,7 @@ export default function HomeScreen() {
                 >
                   <Text style={styles.clearSearch}>×</Text>
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.cameraButton} activeOpacity={0.9}>
-                  <Ionicons name="camera-outline" size={20} color={text} />
-                </TouchableOpacity>
-              )}
+              ) : null}
             </View>
 
             <View style={styles.integratedDivider} />
@@ -965,14 +961,6 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  cameraButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    backgroundColor: "#EEF2F7",
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   clearButton: {
     width: 38,
