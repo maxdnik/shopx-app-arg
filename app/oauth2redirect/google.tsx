@@ -3,13 +3,13 @@ import * as WebBrowser from "expo-web-browser";
 import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
+WebBrowser.maybeCompleteAuthSession();
+
 const navy = "#062B4F";
 const muted = "#718096";
 const soft = "#F7FAFC";
 
-WebBrowser.maybeCompleteAuthSession();
-
-export default function GoogleOAuthRedirectScreen() {
+export default function AuthRedirectScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
       router.replace("/profile");

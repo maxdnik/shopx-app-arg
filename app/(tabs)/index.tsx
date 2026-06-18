@@ -396,7 +396,7 @@ export default function HomeScreen() {
                 <View style={styles.storesBlock}>
                   <View style={styles.storesHeader}>
                     <View>
-                      <Text style={styles.storesEyebrow}>SHOPX ACCESS</Text>
+                
                       <Text style={styles.storesTitle}>Tiendas oficiales</Text>
                     </View>
 
@@ -609,7 +609,7 @@ export default function HomeScreen() {
             >
               {isSearching
                 ? `Resultados para "${homeSearch}"`
-                : "Productos destacados"}
+                : "Destacados"}
             </Text>
           </View>
 

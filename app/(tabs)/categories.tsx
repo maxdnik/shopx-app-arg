@@ -543,7 +543,6 @@ export default function CategoriesScreen() {
       >
         <ScreenHeader
           title="Categorías"
-          subtitle="Explorá productos reales de USA con una experiencia más curada, clara y premium."
           compact
         />
 

@@ -224,7 +224,7 @@ function humanizeSpecLabel(label: string) {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
-function specValueToText(value: any) {
+function specValueToText(value: unknown): string {
   if (value === null || value === undefined) return "";
 
   if (Array.isArray(value)) {
@@ -258,7 +258,7 @@ function specValueToText(value: any) {
   return raw;
 }
 
-function normalizeSpecKey(value: any) {
+function normalizeSpecKey(value: unknown): string {
   return String(value || "")
     .trim()
     .toLowerCase()
@@ -640,11 +640,12 @@ export default function ProductDetailScreen() {
       return;
     }
 
+    const baseProduct = product;
     let cancelled = false;
 
     async function resolveSelectedVariantPricing() {
-      const localProduct = applySelectedProductOptions(product, selectedOptions);
-      const key = getProductSlug(product);
+      const localProduct = applySelectedProductOptions(baseProduct, selectedOptions);
+      const key = getProductSlug(baseProduct);
 
       if (!key) return;
 

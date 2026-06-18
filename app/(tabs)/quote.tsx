@@ -233,7 +233,7 @@ export default function QuoteScreen() {
       >
         <ScreenHeader
           title="Cotizar"
-          subtitle="Mismo flujo que la web: pedís la cotización, ShopX la revisa, la recibís con precio final y la pagás desde tu cuenta."
+          subtitle="Pedís la cotización, ShopX la revisa, la recibís con precio final."
           icon={<Feather name="link-2" size={24} color={white} />}
         />
 
@@ -243,9 +243,6 @@ export default function QuoteScreen() {
               <Feather name="lock" size={28} color={navy} />
             </View>
             <Text style={styles.loginTitle}>Iniciá sesión para cotizar</Text>
-            <Text style={styles.loginText}>
-              Las cotizaciones ahora quedan asociadas a tu cuenta, igual que en la web. Así podés ver el estado, completar datos y pagar cuando ShopX te envía el precio final.
-            </Text>
             <TouchableOpacity style={styles.primaryButton} onPress={() => router.push("/profile")}>
               <Text style={styles.primaryButtonText}>Ir a Mi cuenta</Text>
               <Feather name="arrow-right" size={19} color={white} />
@@ -280,7 +277,6 @@ export default function QuoteScreen() {
               <View style={styles.heroTextBlock}>
                 <Text style={styles.heroKicker}>SHOPX QUOTES</Text>
                 <Text style={styles.heroTitle}>Traé cualquier producto de USA</Text>
-                <Text style={styles.heroText}>Pegá hasta {MAX_PRODUCTS} links. ShopX valida disponibilidad, impuestos, aduana, flete y logística local.</Text>
               </View>
               <View style={styles.heroBadge}>
                 <Text style={styles.heroBadgeText}>USA</Text>
@@ -301,7 +297,6 @@ export default function QuoteScreen() {
                 <View style={styles.cardIcon}><Feather name="link-2" size={20} color={navy} /></View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.sectionTitle}>Links a cotizar</Text>
-                  <Text style={styles.sectionSubtitle}>Talle, color y comentarios son opcionales.</Text>
                 </View>
               </View>
 
@@ -410,7 +405,6 @@ export default function QuoteScreen() {
         <View style={styles.quotesHeader}>
           <View>
             <Text style={styles.myQuotesTitle}>Mis cotizaciones</Text>
-            <Text style={styles.myQuotesSubtitle}>Estado, precio final y pago.</Text>
           </View>
           <TouchableOpacity style={styles.refreshButton} onPress={() => loadQuotes(false)}>
             <Feather name="refresh-cw" size={17} color={navy} />

@@ -227,7 +227,7 @@ function buildQuery(params: Record<string, string | number | undefined | null>) 
   return query ? `?${query}` : "";
 }
 
-async function getAuthHeaders() {
+async function getAuthHeaders(): Promise<Record<string, string>> {
   const token = await getAuthToken();
 
   if (!token) {

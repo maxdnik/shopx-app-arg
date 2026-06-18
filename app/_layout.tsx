@@ -1,9 +1,12 @@
+import * as WebBrowser from "expo-web-browser";
 import { Stack } from "expo-router";
 import { useEffect } from "react";
 import {
   handleInitialPushNotificationRoute,
   setupPushNotifications,
 } from "../lib/push-notifications";
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function RootLayout() {
   useEffect(() => {

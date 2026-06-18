@@ -515,7 +515,7 @@ export default function OrdersScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={navy} />}
       >
-        <ScreenHeader title="Mis pedidos" subtitle="Seguimiento real de tus compras ShopX." />
+        <ScreenHeader title="Mis pedidos" />
 
         <View style={styles.heroCard}>
           <View style={styles.heroIcon}>
@@ -523,9 +523,6 @@ export default function OrdersScreen() {
           </View>
           <Text style={styles.heroEyebrow}>SHOPX TRACKING</Text>
           <Text style={styles.heroTitle}>Tus compras, claras de punta a punta.</Text>
-          <Text style={styles.heroText}>
-            Vemos el estado de cada pedido, el próximo paso y el historial de entrega.
-          </Text>
 
           <View style={styles.statsRow}>
             <View style={styles.statCard}>

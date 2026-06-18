@@ -9,10 +9,10 @@ const navy = "#062B4F";
 const muted = "#718096";
 const soft = "#F7FAFC";
 
-export default function GoogleAuthRedirectScreen() {
+export default function AuthRedirectScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
-      router.replace("/profile" as any);
+      router.replace("/profile");
     }, 350);
 
     return () => clearTimeout(timer);

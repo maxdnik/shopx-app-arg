@@ -47,6 +47,9 @@ export type ShopXProduct = {
   slug: string;
   store?: string;
   brand?: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
   priceUSD?: number;
   estimatedUSD?: number;
   finalPriceUSD?: number;

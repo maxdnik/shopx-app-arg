@@ -266,7 +266,10 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (__DEV__) {
       console.log("GOOGLE AUTH REDIRECT URI", googleRedirectUri);
-      console.log("GOOGLE AUTH REQUEST URL", googleRequest?.url || "request-not-ready");
+      console.log(
+        "GOOGLE AUTH REQUEST URL",
+        googleRequest?.url || "request-not-ready"
+      );
     }
   }, [googleRedirectUri, googleRequest?.url]);
 
@@ -941,7 +944,7 @@ export default function ProfileScreen() {
           subtitle={
             user
               ? "Gestioná tu perfil, pedidos y preferencias de compra."
-              : "Ingresá o creá tu cuenta para comprar y ver tus pedidos."
+              : undefined
           }
         />
 
@@ -1359,9 +1362,6 @@ export default function ProfileScreen() {
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.authTitle}>Entrá a tu cuenta ShopX</Text>
-                  <Text style={styles.authSubtitle}>
-                    Para comprar necesitás iniciar sesión o crear una cuenta.
-                  </Text>
                 </View>
               </View>
 
@@ -1575,10 +1575,6 @@ export default function ProfileScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.trustTitle}>Compra con cuenta ShopX</Text>
-                <Text style={styles.trustText}>
-                  Tus órdenes quedan sincronizadas entre la app, la web y el
-                  panel administrativo.
-                </Text>
               </View>
             </View>
 
@@ -1598,21 +1594,21 @@ export default function ProfileScreen() {
                 <View style={styles.benefitItem}>
                   <Feather name="check-circle" size={18} color={accent} />
                   <Text style={styles.benefitItemText}>
-                    Precio final sin sorpresas
+                    Precio final en pesos.
                   </Text>
                 </View>
 
                 <View style={styles.benefitItem}>
                   <Feather name="check-circle" size={18} color={accent} />
                   <Text style={styles.benefitItemText}>
-                    Pedidos asociados a tu usuario
+                    Seguimiento 100%.
                   </Text>
                 </View>
 
                 <View style={styles.benefitItem}>
                   <Feather name="check-circle" size={18} color={accent} />
                   <Text style={styles.benefitItemText}>
-                    Seguimiento de punta a punta
+                    Compra protegida.
                   </Text>
                 </View>
               </View>
