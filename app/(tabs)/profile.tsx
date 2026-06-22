@@ -242,16 +242,9 @@ export default function ProfileScreen() {
   const [formProvince, setFormProvince] = useState("");
   const [formPostalCode, setFormPostalCode] = useState("");
 
-  const googleRedirectUri = Platform.select({
-    ios: GOOGLE_AUTH_CONFIG.iosRedirectUri,
-    android: AuthSession.makeRedirectUri({
-      scheme: GOOGLE_AUTH_CONFIG.redirectScheme,
-      path: "redirect",
-    }),
-    default: AuthSession.makeRedirectUri({
-      scheme: GOOGLE_AUTH_CONFIG.redirectScheme,
-      path: "redirect",
-    }),
+  const googleRedirectUri = AuthSession.makeRedirectUri({
+    scheme: GOOGLE_AUTH_CONFIG.redirectScheme,
+    path: "redirect",
   });
 
   const [googleRequest, googleResponse, promptGoogleAsync] =
@@ -262,16 +255,6 @@ export default function ProfileScreen() {
       redirectUri: googleRedirectUri,
       scopes: ["openid", "profile", "email"],
     });
-
-  useEffect(() => {
-    if (__DEV__) {
-      console.log("GOOGLE AUTH REDIRECT URI", googleRedirectUri);
-      console.log(
-        "GOOGLE AUTH REQUEST URL",
-        googleRequest?.url || "request-not-ready"
-      );
-    }
-  }, [googleRedirectUri, googleRequest?.url]);
 
   function hydrateForm(nextUser: ShopXUser | null) {
     if (!nextUser) return;
@@ -369,23 +352,7 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     async function finishGoogleLogin() {
-      if (!googleResponse) return;
-
-      if (googleResponse.type !== "success") {
-        setGoogleLoading(false);
-
-        if (googleResponse.type === "error") {
-          Alert.alert(
-            "No pudimos iniciar sesión con Google",
-            (googleResponse as any).error?.message ||
-              googleResponse.params?.error_description ||
-              googleResponse.params?.error ||
-              "Google no devolvió una sesión válida."
-          );
-        }
-
-        return;
-      }
+      if (googleResponse?.type !== "success") return;
 
       const idToken =
         googleResponse.params?.id_token ||
@@ -468,7 +435,7 @@ export default function ProfileScreen() {
   }
 
   function handleOpenWhatsapp() {
-    Linking.openURL("https://wa.me/5491150000000");
+    Linking.openURL("https://wa.me/541162661076");
   }
 
   async function handleAppleLogin() {
@@ -507,12 +474,7 @@ export default function ProfileScreen() {
 
       Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
     } catch (error: any) {
-      if (
-        error?.code === "ERR_REQUEST_CANCELED" ||
-        error?.code === "ERR_CANCELED"
-      ) {
-        return;
-      }
+      if (error?.code === "ERR_REQUEST_CANCELED") return;
 
       Alert.alert(
         "No pudimos iniciar sesión con Apple",
@@ -536,21 +498,7 @@ export default function ProfileScreen() {
 
     try {
       setGoogleLoading(true);
-      const result = await promptGoogleAsync();
-
-      if (result.type !== "success") {
-        setGoogleLoading(false);
-
-        if (result.type === "error") {
-          Alert.alert(
-            "No pudimos abrir Google",
-            (result as any).error?.message ||
-              result.params?.error_description ||
-              result.params?.error ||
-              "Intentá nuevamente."
-          );
-        }
-      }
+      await promptGoogleAsync();
     } catch (error: any) {
       setGoogleLoading(false);
       Alert.alert(
@@ -856,15 +804,15 @@ export default function ProfileScreen() {
     if (deletingAccount) return;
 
     Alert.alert(
-      "¿Eliminar cuenta?",
-      "Esta acción es permanente y no puede deshacerse. Se eliminará tu cuenta y tus datos personales de ShopX.",
+      "Eliminar cuenta",
+      "Esta acción elimina tu cuenta ShopX y cierra la sesión en este dispositivo. No es una desactivación temporal.",
       [
         {
           text: "Cancelar",
           style: "cancel",
         },
         {
-          text: "Eliminar",
+          text: "Eliminar definitivamente",
           style: "destructive",
           onPress: async () => {
             try {
@@ -944,7 +892,7 @@ export default function ProfileScreen() {
           subtitle={
             user
               ? "Gestioná tu perfil, pedidos y preferencias de compra."
-              : undefined
+              : "Ingresá o creá tu cuenta para comprar y ver tus pedidos."
           }
         />
 
@@ -1328,11 +1276,6 @@ export default function ProfileScreen() {
               <Text style={styles.whatsappButtonText}>Hablar con ShopX</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Feather name="log-out" size={18} color={white} />
-              <Text style={styles.logoutText}>Cerrar sesión</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity
               style={[styles.deleteAccountButton, deletingAccount && styles.buttonDisabled]}
               onPress={confirmDeleteAccount}
@@ -1342,10 +1285,15 @@ export default function ProfileScreen() {
                 <ActivityIndicator color="#C53030" />
               ) : (
                 <>
-                  <Feather name="trash-2" size={16} color="#C53030" />
+                  <Feather name="trash-2" size={18} color="#C53030" />
                   <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
                 </>
               )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+              <Feather name="log-out" size={18} color={muted} />
+              <Text style={styles.logoutText}>Cerrar sesión</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -1362,6 +1310,9 @@ export default function ProfileScreen() {
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.authTitle}>Entrá a tu cuenta ShopX</Text>
+                  <Text style={styles.authSubtitle}>
+                    Para comprar necesitás iniciar sesión o crear una cuenta.
+                  </Text>
                 </View>
               </View>
 
@@ -1575,6 +1526,10 @@ export default function ProfileScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.trustTitle}>Compra con cuenta ShopX</Text>
+                <Text style={styles.trustText}>
+                  Tus órdenes quedan sincronizadas entre la app, la web y el
+                  panel administrativo.
+                </Text>
               </View>
             </View>
 
@@ -1594,21 +1549,21 @@ export default function ProfileScreen() {
                 <View style={styles.benefitItem}>
                   <Feather name="check-circle" size={18} color={accent} />
                   <Text style={styles.benefitItemText}>
-                    Precio final en pesos.
+                    Precio final sin sorpresas
                   </Text>
                 </View>
 
                 <View style={styles.benefitItem}>
                   <Feather name="check-circle" size={18} color={accent} />
                   <Text style={styles.benefitItemText}>
-                    Seguimiento 100%.
+                    Pedidos asociados a tu usuario
                   </Text>
                 </View>
 
                 <View style={styles.benefitItem}>
                   <Feather name="check-circle" size={18} color={accent} />
                   <Text style={styles.benefitItemText}>
-                    Compra protegida.
+                    Seguimiento de punta a punta
                   </Text>
                 </View>
               </View>
@@ -2141,41 +2096,37 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   deleteAccountButton: {
-    marginTop: 14,
+    marginHorizontal: 18,
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 18,
+    backgroundColor: "#FFF5F5",
+    borderWidth: 1,
+    borderColor: "#FED7D7",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  deleteAccountText: {
+    color: "#C53030",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  logoutButton: {
+    marginTop: 18,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
     gap: 7,
     paddingVertical: 10,
     paddingHorizontal: 14,
   },
-  deleteAccountText: {
-    color: "#C53030",
+  logoutText: {
+    color: muted,
     fontSize: 13,
     fontWeight: "800",
-  },
-
-  logoutButton: {
-    marginHorizontal: 18,
-    marginTop: 20,
-    minHeight: 56,
-    borderRadius: 999,
-    backgroundColor: navy,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 9,
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 4,
-  },
-  logoutText: {
-    color: white,
-    fontSize: 16,
-    fontWeight: "900",
   },
 
   authCard: {

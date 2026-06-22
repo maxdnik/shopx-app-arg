@@ -819,7 +819,7 @@ export default function OrderDetailScreen() {
           <TouchableOpacity
             style={styles.topIconButton}
             activeOpacity={0.85}
-            onPress={() => Linking.openURL("https://wa.me/5491150000000")}
+            onPress={() => Linking.openURL("https://wa.me/541162661076")}
           >
             <MaterialCommunityIcons name="whatsapp" size={21} color={navy} />
           </TouchableOpacity>
@@ -1188,7 +1188,7 @@ export default function OrderDetailScreen() {
 
           <TouchableOpacity
             style={styles.helpButton}
-            onPress={() => Linking.openURL("https://wa.me/5491150000000")}
+            onPress={() => Linking.openURL("https://wa.me/541162661076")}
           >
             <Text style={styles.helpButtonText}>Abrir</Text>
           </TouchableOpacity>
