@@ -122,7 +122,6 @@ export default function HomeScreen() {
 
   const isSearching = homeSearch.trim().length > 0;
 
-
   async function loadStores() {
     try {
       const result = await getOfficialStores();
@@ -187,7 +186,7 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadDeliveryProfile();
-    }, [])
+    }, []),
   );
 
   useEffect(() => {
@@ -219,10 +218,20 @@ export default function HomeScreen() {
     return () => clearTimeout(timeout);
   }, [homeSearch]);
 
-  const featuredProducts = useMemo(() => products.slice(0, 8), [products]);
-  const recommendedProducts = useMemo(() => products.slice(8, 16), [products]);
+  const mostRequestedProducts = useMemo(
+    () => products.slice(0, 10),
+    [products],
+  );
+  const featuredProducts = useMemo(() => {
+    const highlighted = products.slice(10, 16);
+    return highlighted.length > 0 ? highlighted : products.slice(0, 6);
+  }, [products]);
+  const curatedProducts = useMemo(() => {
+    const curated = products.slice(16, 24);
+    return curated.length > 0 ? curated : products.slice(6, 14);
+  }, [products]);
   const heroProduct = products[0];
-  const visibleProducts = isSearching ? searchResults : featuredProducts;
+  const visibleProducts = searchResults;
   const heroImage = heroProduct ? getProductImage(heroProduct) : "";
   const locationText = deliveryLabel || "Configurar ubicación";
 
@@ -250,7 +259,9 @@ export default function HomeScreen() {
               >
                 <Ionicons name="notifications-outline" size={19} color={text} />
 
-                {unreadCount > 0 ? <View style={styles.notificationDot} /> : null}
+                {unreadCount > 0 ? (
+                  <View style={styles.notificationDot} />
+                ) : null}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -396,7 +407,7 @@ export default function HomeScreen() {
                 <View style={styles.storesBlock}>
                   <View style={styles.storesHeader}>
                     <View>
-                
+                      <Text style={styles.storesEyebrow}>SHOPX ACCESS</Text>
                       <Text style={styles.storesTitle}>Tiendas oficiales</Text>
                     </View>
 
@@ -443,7 +454,10 @@ export default function HomeScreen() {
                                 resizeMode="contain"
                               />
                             ) : (
-                              <Text style={styles.storeWordmark} numberOfLines={2}>
+                              <Text
+                                style={styles.storeWordmark}
+                                numberOfLines={2}
+                              >
                                 {logoText}
                               </Text>
                             )}
@@ -452,7 +466,6 @@ export default function HomeScreen() {
                           <Text style={styles.storeName} numberOfLines={1}>
                             {store.name}
                           </Text>
-                          <Text style={styles.storeSubtitle}>Tienda USA</Text>
                         </TouchableOpacity>
                       );
                     })}
@@ -532,13 +545,12 @@ export default function HomeScreen() {
                     </View>
 
                     <Text style={styles.heroTitle}>
-                      Comprá{"\n"}en{"\n"}USA.{"\n"}Recibí en{"\n"}
-                      <Text style={styles.heroAccent}>Argentina</Text>
+                      Comprá en USA.{"\n"}
+                      Recibí en <Text style={styles.heroAccent}>Argentina</Text>
                     </Text>
 
                     <Text style={styles.heroSubtitle}>
-                      Productos originales,{"\n"}precio final y{"\n"}seguimiento
-                      real.
+                      Productos originales, precio final y seguimiento real.
                     </Text>
 
                     <TouchableOpacity
@@ -558,7 +570,7 @@ export default function HomeScreen() {
                     <Text style={styles.heroProductPrice}>
                       {heroProduct
                         ? `USD ${formatUSD(
-                            getDisplayFinalPriceUSD(heroProduct)
+                            getDisplayFinalPriceUSD(heroProduct),
                           )}`
                         : "USD 2,499"}
                     </Text>
@@ -596,103 +608,164 @@ export default function HomeScreen() {
           )}
         </View>
 
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <View style={styles.sectionIcon}>
-              <Feather name="star" size={17} color={white} />
+        {isSearching ? (
+          <>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionIcon}>
+                  <Feather name="search" size={17} color={white} />
+                </View>
+
+                <Text
+                  style={styles.sectionTitle}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                >
+                  {`Resultados para "${homeSearch}"`}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.viewAllButton}
+                onPress={() => setHomeSearch("")}
+              >
+                <Text style={styles.viewAll}>Limpiar</Text>
+                <Feather name="chevron-right" size={22} color={accent} />
+              </TouchableOpacity>
             </View>
 
-            <Text
-              style={styles.sectionTitle}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-            >
-              {isSearching
-                ? `Resultados para "${homeSearch}"`
-                : "Destacados"}
-            </Text>
-          </View>
+            {searchLoading ? (
+              <View style={styles.loadingBox}>
+                <ActivityIndicator color={navy} />
+                <Text style={styles.loadingText}>Buscando productos...</Text>
+              </View>
+            ) : searchError ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorTitle}>
+                  No pudimos buscar productos
+                </Text>
+                <Text style={styles.errorText}>{searchError}</Text>
 
-          <TouchableOpacity
-            style={styles.viewAllButton}
-            onPress={() =>
-              isSearching ? setHomeSearch("") : router.push("/categories")
-            }
-          >
-            <Text style={styles.viewAll}>
-              {isSearching ? "Limpiar" : "Ver todos"}
-            </Text>
-            <Feather name="chevron-right" size={22} color={accent} />
-          </TouchableOpacity>
-        </View>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={() => {
+                    const currentSearch = homeSearch;
+                    setHomeSearch("");
+                    setTimeout(() => setHomeSearch(currentSearch), 80);
+                  }}
+                >
+                  <Text style={styles.retryButtonText}>Reintentar</Text>
+                </TouchableOpacity>
+              </View>
+            ) : visibleProducts.length === 0 ? (
+              <View style={styles.emptySearchBox}>
+                <Feather name="search" size={42} color={muted} />
+                <Text style={styles.emptySearchTitle}>
+                  No encontramos productos
+                </Text>
+                <Text style={styles.emptySearchText}>
+                  Probá buscar por marca, modelo o categoría.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.productsGrid}>
+                {visibleProducts.map((product, index) => {
+                  const key =
+                    product._id ||
+                    product.id ||
+                    product.slug ||
+                    `${product.title}-${index}`;
 
-        {loading && !isSearching ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator color={navy} />
-            <Text style={styles.loadingText}>Cargando productos...</Text>
-          </View>
-        ) : searchLoading ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator color={navy} />
-            <Text style={styles.loadingText}>Buscando productos...</Text>
-          </View>
-        ) : errorMessage && !isSearching ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>No pudimos cargar productos</Text>
-            <Text style={styles.errorText}>{errorMessage}</Text>
-
-            <TouchableOpacity style={styles.retryButton} onPress={loadProducts}>
-              <Text style={styles.retryButtonText}>Reintentar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : searchError ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>No pudimos buscar productos</Text>
-            <Text style={styles.errorText}>{searchError}</Text>
-
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => {
-                const currentSearch = homeSearch;
-                setHomeSearch("");
-                setTimeout(() => setHomeSearch(currentSearch), 80);
-              }}
-            >
-              <Text style={styles.retryButtonText}>Reintentar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : visibleProducts.length === 0 ? (
-          <View style={styles.emptySearchBox}>
-            <Feather name="search" size={42} color={muted} />
-            <Text style={styles.emptySearchTitle}>No encontramos productos</Text>
-            <Text style={styles.emptySearchText}>
-              Probá buscar por marca, modelo o categoría.
-            </Text>
-          </View>
+                  return (
+                    <View key={key} style={styles.productGridItem}>
+                      <ProductCard
+                        product={product}
+                        variant="deal"
+                        onPress={() => openProduct(product)}
+                      />
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </>
         ) : (
-          <View style={styles.productsGrid}>
-            {visibleProducts.map((product, index) => {
-              const key =
-                product._id ||
-                product.id ||
-                product.slug ||
-                `${product.title}-${index}`;
-
-              return (
-                <View key={key} style={styles.productGridItem}>
-                  <ProductCard
-                    product={product}
-                    variant="deal"
-                    onPress={() => openProduct(product)}
-                  />
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {!isSearching && (
           <>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionIcon}>
+                  <Feather name="trending-up" size={17} color={white} />
+                </View>
+
+                <Text style={styles.sectionTitle} numberOfLines={2}>
+                  Lo más pedido de esta semana
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.viewAllButton}
+                onPress={() => router.push("/categories")}
+              >
+                <Text style={styles.viewAll}>Ver todos</Text>
+                <Feather name="chevron-right" size={22} color={accent} />
+              </TouchableOpacity>
+            </View>
+
+            {loading ? (
+              <View style={styles.loadingBox}>
+                <ActivityIndicator color={navy} />
+                <Text style={styles.loadingText}>Cargando productos...</Text>
+              </View>
+            ) : errorMessage ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorTitle}>
+                  No pudimos cargar productos
+                </Text>
+                <Text style={styles.errorText}>{errorMessage}</Text>
+
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={loadProducts}
+                >
+                  <Text style={styles.retryButtonText}>Reintentar</Text>
+                </TouchableOpacity>
+              </View>
+            ) : mostRequestedProducts.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalProductsRow}
+              >
+                {mostRequestedProducts.map((product, index) => {
+                  const key =
+                    product._id ||
+                    product.id ||
+                    product.slug ||
+                    `most-requested-${product.title}-${index}`;
+
+                  return (
+                    <View key={key} style={styles.horizontalProductItem}>
+                      <ProductCard
+                        product={product}
+                        variant="deal"
+                        onPress={() => openProduct(product)}
+                      />
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <View style={styles.emptySearchBox}>
+                <Feather name="shopping-bag" size={42} color={muted} />
+                <Text style={styles.emptySearchTitle}>
+                  No hay productos disponibles
+                </Text>
+                <Text style={styles.emptySearchText}>
+                  Volvé a intentar en unos minutos.
+                </Text>
+              </View>
+            )}
+
             <LinearGradient
               colors={[navyDark, navy]}
               start={{ x: 0, y: 0 }}
@@ -719,6 +792,38 @@ export default function HomeScreen() {
             </LinearGradient>
 
             <View style={styles.sectionHeaderSimple}>
+              <Text style={styles.sectionTitle}>Destacados</Text>
+
+              <TouchableOpacity
+                style={styles.viewAllButton}
+                onPress={() => router.push("/categories")}
+              >
+                <Text style={styles.viewAll}>Ver todo</Text>
+                <Feather name="chevron-right" size={22} color={accent} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.productsGrid}>
+              {featuredProducts.slice(0, 6).map((product, index) => {
+                const key =
+                  product._id ||
+                  product.id ||
+                  product.slug ||
+                  `featured-${product.title}-${index}`;
+
+                return (
+                  <View key={key} style={styles.productGridItem}>
+                    <ProductCard
+                      product={product}
+                      variant="deal"
+                      onPress={() => openProduct(product)}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={styles.sectionHeaderSimple}>
               <Text style={styles.sectionTitle}>Curado por ShopX</Text>
 
               <TouchableOpacity
@@ -731,15 +836,15 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.productsGrid}>
-              {(recommendedProducts.length > 0
-                ? recommendedProducts
+              {(curatedProducts.length > 0
+                ? curatedProducts
                 : featuredProducts
               ).map((product, index) => {
                 const key =
                   product._id ||
                   product.id ||
                   product.slug ||
-                  `recommended-${product.title}-${index}`;
+                  `curated-${product.title}-${index}`;
 
                 return (
                   <View key={key} style={styles.productGridItem}>
@@ -961,7 +1066,6 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-
   clearButton: {
     width: 38,
     height: 38,
@@ -1064,7 +1168,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#DDE6EF",
   },
 
-
   storesBlock: {
     marginTop: 17,
   },
@@ -1073,7 +1176,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   storesEyebrow: {
@@ -1113,7 +1216,7 @@ const styles = StyleSheet.create({
 
   storeCard: {
     width: 126,
-    minHeight: 132,
+    minHeight: 116,
     borderRadius: 24,
     backgroundColor: white,
     borderWidth: 1,
@@ -1538,6 +1641,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: "center",
+  },
+
+  horizontalProductsRow: {
+    paddingLeft: 22,
+    paddingRight: 22,
+    paddingBottom: 4,
+    gap: 12,
+  },
+
+  horizontalProductItem: {
+    width: 190,
   },
 
   productsGrid: {
