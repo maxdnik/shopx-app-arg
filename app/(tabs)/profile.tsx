@@ -892,7 +892,7 @@ export default function ProfileScreen() {
           subtitle={
             user
               ? "Gestioná tu perfil, pedidos y preferencias de compra."
-              : "Ingresá o creá tu cuenta para comprar y ver tus pedidos."
+              : undefined
           }
         />
 
@@ -1231,42 +1231,6 @@ export default function ProfileScreen() {
               ))}
             </View>
 
-            <View style={styles.benefitsCard}>
-              <View style={styles.benefitHeader}>
-                <View>
-                  <Text style={styles.benefitEyebrow}>SHOPX CLUB</Text>
-                  <Text style={styles.benefitTitle}>Tu acceso a USA</Text>
-                </View>
-
-                <View style={styles.benefitBadge}>
-                  <Text style={styles.benefitBadgeText}>ACTIVO</Text>
-                </View>
-              </View>
-
-              <View style={styles.benefitList}>
-                <View style={styles.benefitItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.benefitItemText}>
-                    Precio final sin sorpresas
-                  </Text>
-                </View>
-
-                <View style={styles.benefitItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.benefitItemText}>
-                    Seguimiento de punta a punta
-                  </Text>
-                </View>
-
-                <View style={styles.benefitItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.benefitItemText}>
-                    Atención real por WhatsApp
-                  </Text>
-                </View>
-              </View>
-            </View>
-
             <TouchableOpacity
               style={styles.whatsappButton}
               activeOpacity={0.9}
@@ -1515,59 +1479,6 @@ export default function ProfileScreen() {
               )}
             </View>
 
-            <View style={styles.trustCard}>
-              <View style={styles.trustIcon}>
-                <MaterialCommunityIcons
-                  name="shield-check-outline"
-                  size={25}
-                  color={white}
-                />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.trustTitle}>Compra con cuenta ShopX</Text>
-                <Text style={styles.trustText}>
-                  Tus órdenes quedan sincronizadas entre la app, la web y el
-                  panel administrativo.
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.benefitsCard}>
-              <View style={styles.benefitHeader}>
-                <View>
-                  <Text style={styles.benefitEyebrow}>SHOPX CLUB</Text>
-                  <Text style={styles.benefitTitle}>Tu acceso a USA</Text>
-                </View>
-
-                <View style={styles.benefitBadge}>
-                  <Text style={styles.benefitBadgeText}>GRATIS</Text>
-                </View>
-              </View>
-
-              <View style={styles.benefitList}>
-                <View style={styles.benefitItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.benefitItemText}>
-                    Precio final sin sorpresas
-                  </Text>
-                </View>
-
-                <View style={styles.benefitItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.benefitItemText}>
-                    Pedidos asociados a tu usuario
-                  </Text>
-                </View>
-
-                <View style={styles.benefitItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.benefitItemText}>
-                    Seguimiento de punta a punta
-                  </Text>
-                </View>
-              </View>
-            </View>
           </>
         )}
 
