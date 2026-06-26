@@ -38,6 +38,7 @@ import {
   updateAppAccount,
   forgotPasswordApp,
 } from "../../lib/auth";
+import { registerForPushNotificationsAsync } from "../../lib/push-notifications";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -242,10 +243,15 @@ export default function ProfileScreen() {
   const [formProvince, setFormProvince] = useState("");
   const [formPostalCode, setFormPostalCode] = useState("");
 
-  const googleRedirectUri = AuthSession.makeRedirectUri({
+  const fallbackGoogleRedirectUri = AuthSession.makeRedirectUri({
     scheme: GOOGLE_AUTH_CONFIG.redirectScheme,
     path: "redirect",
   });
+
+  const googleRedirectUri =
+    Platform.OS === "ios" && GOOGLE_AUTH_CONFIG.iosRedirectUri
+      ? GOOGLE_AUTH_CONFIG.iosRedirectUri
+      : fallbackGoogleRedirectUri;
 
   const [googleRequest, googleResponse, promptGoogleAsync] =
     Google.useIdTokenAuthRequest({
@@ -255,6 +261,11 @@ export default function ProfileScreen() {
       redirectUri: googleRedirectUri,
       scopes: ["openid", "profile", "email"],
     });
+
+  useEffect(() => {
+    console.log("GOOGLE AUTH REDIRECT URI", googleRedirectUri);
+    console.log("GOOGLE AUTH REQUEST URL", googleRequest?.url || "request-not-ready");
+  }, [googleRedirectUri, googleRequest?.url]);
 
   function hydrateForm(nextUser: ShopXUser | null) {
     if (!nextUser) return;
@@ -289,6 +300,12 @@ export default function ProfileScreen() {
       await loadProfileOrders(account.user);
     } catch {
       // Login succeeded; account endpoint can be retried later.
+    }
+
+    try {
+      await registerForPushNotificationsAsync({ requestPermissions: false });
+    } catch (error) {
+      console.log("ERROR REGISTER PUSH AFTER AUTH:", error);
     }
   }
 
@@ -352,7 +369,23 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     async function finishGoogleLogin() {
-      if (googleResponse?.type !== "success") return;
+      if (!googleResponse) return;
+
+      if (googleResponse.type !== "success") {
+        setGoogleLoading(false);
+
+        if (googleResponse.type === "error") {
+          Alert.alert(
+            "No pudimos iniciar sesión con Google",
+            (googleResponse as any).error?.message ||
+              googleResponse.params?.error_description ||
+              googleResponse.params?.error ||
+              "Google no devolvió una sesión válida."
+          );
+        }
+
+        return;
+      }
 
       const idToken =
         googleResponse.params?.id_token ||
@@ -498,7 +531,21 @@ export default function ProfileScreen() {
 
     try {
       setGoogleLoading(true);
-      await promptGoogleAsync();
+      const result = await promptGoogleAsync();
+
+      if (result.type !== "success") {
+        setGoogleLoading(false);
+
+        if (result.type === "error") {
+          Alert.alert(
+            "No pudimos abrir Google",
+            (result as any).error?.message ||
+              result.params?.error_description ||
+              result.params?.error ||
+              "Intentá nuevamente."
+          );
+        }
+      }
     } catch (error: any) {
       setGoogleLoading(false);
       Alert.alert(

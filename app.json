@@ -52,7 +52,8 @@
       "expo-web-browser",
       "expo-dev-client",
       "expo-font",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

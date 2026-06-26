@@ -23,6 +23,7 @@ import {
   getDisplayFinalPriceUSD,
   getProductImage,
   getProducts,
+  getWeeklyMostRequestedProducts,
   searchProducts,
   ShopXProduct,
 } from "../../lib/api";
@@ -104,6 +105,29 @@ function CategoryIcon({
   return <MaterialCommunityIcons name={icon as any} size={25} color={color} />;
 }
 
+
+function sortProductsByWeeklyPickOrder(products: ShopXProduct[]) {
+  return products
+    .map((product, index) => ({ product, index }))
+    .sort((a, b) => {
+      const aOrder = Number(a.product.weeklyPickOrder);
+      const bOrder = Number(b.product.weeklyPickOrder);
+      const aHasOrder = Number.isFinite(aOrder);
+      const bHasOrder = Number.isFinite(bOrder);
+
+      if (aHasOrder && bHasOrder && aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+
+      if (aHasOrder && !bHasOrder) return -1;
+      if (!aHasOrder && bHasOrder) return 1;
+
+      return a.index - b.index;
+    })
+    .map(({ product }) => product);
+}
+
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const cartCount = useCartCount();
@@ -111,6 +135,7 @@ export default function HomeScreen() {
   const { unreadCount } = useUnreadNotificationsCount({ seedDemo: false });
 
   const [products, setProducts] = useState<ShopXProduct[]>([]);
+  const [weeklyProducts, setWeeklyProducts] = useState<ShopXProduct[]>([]);
   const [stores, setStores] = useState<ShopXStore[]>([]);
   const [searchResults, setSearchResults] = useState<ShopXProduct[]>([]);
   const [homeSearch, setHomeSearch] = useState("");
@@ -146,8 +171,16 @@ export default function HomeScreen() {
     setErrorMessage("");
 
     try {
-      const result = await getProducts(100);
+      const [result, weeklyResult] = await Promise.all([
+        getProducts(100),
+        getWeeklyMostRequestedProducts(10).catch((error) => {
+          console.log("ERROR HOME WEEKLY PRODUCTS:", error);
+          return [] as ShopXProduct[];
+        }),
+      ]);
+
       setProducts(result);
+      setWeeklyProducts(weeklyResult);
     } catch (error) {
       console.log("ERROR HOME PRODUCTS:", error);
       setErrorMessage("No pudimos cargar los productos.");
@@ -218,10 +251,13 @@ export default function HomeScreen() {
     return () => clearTimeout(timeout);
   }, [homeSearch]);
 
-  const mostRequestedProducts = useMemo(
-    () => products.slice(0, 10),
-    [products],
-  );
+  const mostRequestedProducts = useMemo(() => {
+    if (weeklyProducts.length > 0) {
+      return sortProductsByWeeklyPickOrder(weeklyProducts).slice(0, 10);
+    }
+
+    return products.slice(0, 10);
+  }, [products, weeklyProducts]);
   const featuredProducts = useMemo(() => {
     const highlighted = products.slice(10, 16);
     return highlighted.length > 0 ? highlighted : products.slice(0, 6);

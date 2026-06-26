@@ -83,6 +83,9 @@ export type ShopXProduct = {
   selectedOptions?: SelectedProductOptions;
   selectedVariant?: SelectedProductVariant | any;
   selectedVariantId?: string;
+  weeklyPick?: boolean;
+  weeklyPickOrder?: number;
+  weeklyPickUpdatedAt?: string;
   pricing?: ProductPricing;
 };
 
@@ -770,6 +773,29 @@ async function hydrateProductsWithResolvedPricing(
   }
 }
 
+
+function sortProductsByWeeklyPickOrder(products: ShopXProduct[]): ShopXProduct[] {
+  return products
+    .map((product, index) => ({ product, index }))
+    .sort((a, b) => {
+      const aOrder = Number(a.product.weeklyPickOrder);
+      const bOrder = Number(b.product.weeklyPickOrder);
+      const aHasOrder = Number.isFinite(aOrder);
+      const bHasOrder = Number.isFinite(bOrder);
+
+      if (aHasOrder && bHasOrder && aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+
+      if (aHasOrder && !bHasOrder) return -1;
+      if (!aHasOrder && bHasOrder) return 1;
+
+      return a.index - b.index;
+    })
+    .map(({ product }) => product);
+}
+
+
 export async function getProducts(
   limit = 100,
   destination?: DomesticPricingDestination
@@ -787,6 +813,29 @@ export async function getProducts(
   }
 
   return hydrateProductsWithResolvedPricing(data.products, destination);
+}
+
+
+export async function getWeeklyMostRequestedProducts(
+  limit = 10,
+  destination?: DomesticPricingDestination
+): Promise<ShopXProduct[]> {
+  const response = await fetch(
+    buildApiUrl(`/api/app/products?collection=weekly-most-requested&limit=${limit}`)
+  );
+
+  if (!response.ok) {
+    throw new Error("No se pudieron obtener los productos más pedidos de la semana");
+  }
+
+  const data = await response.json();
+
+  if (!data?.ok || !Array.isArray(data.products)) {
+    throw new Error("Respuesta inválida de /api/app/products weekly-most-requested");
+  }
+
+  const hydratedProducts = await hydrateProductsWithResolvedPricing(data.products, destination);
+  return sortProductsByWeeklyPickOrder(hydratedProducts).slice(0, limit);
 }
 
 export async function searchProducts(
