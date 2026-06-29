@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": [
       "shopxapp",
-      "com.googleusercontent.apps.935352834479-tf3habem4sk9nl3ut82c9b1ocvjt7t8k"
+      "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
     ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -21,7 +21,8 @@
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
-              "com.googleusercontent.apps.935352834479-tf3habem4sk9nl3ut82c9b1ocvjt7t8k"
+              "shopxapp",
+              "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
             ]
           }
         ]
