@@ -255,8 +255,8 @@ export default function ProfileScreen() {
 
   const [googleRequest, googleResponse, promptGoogleAsync] =
     Google.useIdTokenAuthRequest({
-      clientId: GOOGLE_AUTH_CONFIG.webClientId,
-      iosClientId: GOOGLE_AUTH_CONFIG.iosClientId || undefined,
+      webClientId: GOOGLE_AUTH_CONFIG.webClientId,
+      iosClientId: GOOGLE_AUTH_CONFIG.iosClientId,
       androidClientId: GOOGLE_AUTH_CONFIG.androidClientId || undefined,
       redirectUri: googleRedirectUri,
       scopes: ["openid", "profile", "email"],

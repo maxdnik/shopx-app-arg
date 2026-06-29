@@ -2,7 +2,7 @@
   "expo": {
     "name": "ShopX",
     "slug": "shopx",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -14,18 +14,24 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.maximodimnik.shopx",
-      "buildNumber": "9",
+      "buildNumber": "11",
       "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
-              "shopxapp",
+              "shopxapp"
+            ]
+          },
+          {
+            "CFBundleURLSchemes": [
               "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
             ]
           }
-        ]
+        ],
+        "GIDClientID": "935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc.apps.googleusercontent.com",
+        "GIDServerClientID": "935352834479-pdl30nl91se82noe814lup4gv4o9or03.apps.googleusercontent.com"
       }
     },
     "android": {
