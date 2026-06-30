@@ -2,7 +2,7 @@
   "expo": {
     "name": "ShopX",
     "slug": "shopx",
-    "version": "1.1.2",
+    "version": "1.1.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -14,18 +14,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.maximodimnik.shopx",
-      "buildNumber": "11",
+      "buildNumber": "10",
       "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
-              "shopxapp"
-            ]
-          },
-          {
-            "CFBundleURLSchemes": [
+              "shopxapp",
               "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
             ]
           }
@@ -67,7 +63,13 @@
       "expo-dev-client",
       "expo-font",
       "expo-apple-authentication",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

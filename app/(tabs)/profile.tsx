@@ -1,5 +1,4 @@
 import { router, useFocusEffect } from "expo-router";
-import * as AuthSession from "expo-auth-session";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -16,7 +15,13 @@ import {
   View,
 } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import * as Google from "expo-auth-session/providers/google";
+import {
+  GoogleSignin,
+  isCancelledResponse,
+  isErrorWithCode,
+  isSuccessResponse,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
 import * as WebBrowser from "expo-web-browser";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
@@ -243,29 +248,14 @@ export default function ProfileScreen() {
   const [formProvince, setFormProvince] = useState("");
   const [formPostalCode, setFormPostalCode] = useState("");
 
-  const fallbackGoogleRedirectUri = AuthSession.makeRedirectUri({
-    scheme: GOOGLE_AUTH_CONFIG.redirectScheme,
-    path: "redirect",
-  });
-
-  const googleRedirectUri =
-    Platform.OS === "ios" && GOOGLE_AUTH_CONFIG.iosRedirectUri
-      ? GOOGLE_AUTH_CONFIG.iosRedirectUri
-      : fallbackGoogleRedirectUri;
-
-  const [googleRequest, googleResponse, promptGoogleAsync] =
-    Google.useIdTokenAuthRequest({
+  useEffect(() => {
+    GoogleSignin.configure({
       webClientId: GOOGLE_AUTH_CONFIG.webClientId,
       iosClientId: GOOGLE_AUTH_CONFIG.iosClientId,
-      androidClientId: GOOGLE_AUTH_CONFIG.androidClientId || undefined,
-      redirectUri: googleRedirectUri,
-      scopes: ["openid", "profile", "email"],
+      offlineAccess: false,
+      scopes: ["profile", "email"],
     });
-
-  useEffect(() => {
-    console.log("GOOGLE AUTH REDIRECT URI", googleRedirectUri);
-    console.log("GOOGLE AUTH REQUEST URL", googleRequest?.url || "request-not-ready");
-  }, [googleRedirectUri, googleRequest?.url]);
+  }, []);
 
   function hydrateForm(nextUser: ShopXUser | null) {
     if (!nextUser) return;
@@ -367,61 +357,6 @@ export default function ProfileScreen() {
       .catch(() => setAppleAvailable(false));
   }, []);
 
-  useEffect(() => {
-    async function finishGoogleLogin() {
-      if (!googleResponse) return;
-
-      if (googleResponse.type !== "success") {
-        setGoogleLoading(false);
-
-        if (googleResponse.type === "error") {
-          Alert.alert(
-            "No pudimos iniciar sesión con Google",
-            (googleResponse as any).error?.message ||
-              googleResponse.params?.error_description ||
-              googleResponse.params?.error ||
-              "Google no devolvió una sesión válida."
-          );
-        }
-
-        return;
-      }
-
-      const idToken =
-        googleResponse.params?.id_token ||
-        googleResponse.authentication?.idToken ||
-        "";
-
-      if (!idToken) {
-        setGoogleLoading(false);
-        Alert.alert(
-          "Google no devolvió sesión",
-          "No pudimos obtener el token de Google. Intentá nuevamente."
-        );
-        return;
-      }
-
-      try {
-        const loggedUser = await loginWithGoogleApp({ idToken });
-        await hydrateAccountAfterAuth(loggedUser);
-
-        Alert.alert(
-          "Sesión iniciada",
-          "Ya podés comprar con tu cuenta ShopX."
-        );
-      } catch (error: any) {
-        Alert.alert(
-          "No pudimos iniciar sesión con Google",
-          error?.message || "Intentá nuevamente."
-        );
-      } finally {
-        setGoogleLoading(false);
-      }
-    }
-
-    finishGoogleLogin();
-  }, [googleResponse]);
-
   function scrollToCheckoutCard() {
     setEditCheckoutData(true);
 
@@ -521,37 +456,52 @@ export default function ProfileScreen() {
   async function handleGoogleLogin() {
     if (googleLoading || appleLoading || submitting) return;
 
-    if (!GOOGLE_AUTH_CONFIG.webClientId) {
-      Alert.alert(
-        "Google no configurado",
-        "Falta EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID en la app."
-      );
-      return;
-    }
-
     try {
       setGoogleLoading(true);
-      const result = await promptGoogleAsync();
 
-      if (result.type !== "success") {
-        setGoogleLoading(false);
+      if (Platform.OS === "android") {
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      }
 
-        if (result.type === "error") {
+      await GoogleSignin.signOut().catch(() => undefined);
+      const response = await GoogleSignin.signIn();
+
+      if (isCancelledResponse(response)) {
+        return;
+      }
+
+      if (!isSuccessResponse(response)) {
+        throw new Error("Google no devolvió una sesión válida.");
+      }
+
+      const idToken = response.data.idToken;
+
+      if (!idToken) {
+        throw new Error("Google no devolvió el token de sesión.");
+      }
+
+      const loggedUser = await loginWithGoogleApp({ idToken });
+      await hydrateAccountAfterAuth(loggedUser);
+
+      Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
+    } catch (error: any) {
+      if (isErrorWithCode(error)) {
+        if (error.code === statusCodes.IN_PROGRESS) return;
+        if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
           Alert.alert(
-            "No pudimos abrir Google",
-            (result as any).error?.message ||
-              result.params?.error_description ||
-              result.params?.error ||
-              "Intentá nuevamente."
+            "Google Play Services no disponible",
+            "Actualizá Google Play Services e intentá nuevamente."
           );
+          return;
         }
       }
-    } catch (error: any) {
-      setGoogleLoading(false);
+
       Alert.alert(
-        "No pudimos abrir Google",
+        "No pudimos iniciar sesión con Google",
         error?.message || "Intentá nuevamente."
       );
+    } finally {
+      setGoogleLoading(false);
     }
   }
 
@@ -1352,12 +1302,12 @@ export default function ProfileScreen() {
               <TouchableOpacity
                 style={[
                   styles.googleButton,
-                  (!googleRequest || googleLoading || appleLoading || submitting) &&
+                  (googleLoading || appleLoading || submitting) &&
                     styles.buttonDisabled,
                 ]}
                 activeOpacity={0.9}
                 onPress={handleGoogleLogin}
-                disabled={!googleRequest || googleLoading || appleLoading || submitting}
+                disabled={googleLoading || appleLoading || submitting}
               >
                 {googleLoading ? (
                   <ActivityIndicator color={text} />
