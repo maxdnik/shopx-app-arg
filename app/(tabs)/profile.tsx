@@ -27,7 +27,10 @@ import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { useFavorites } from "../../hooks/useFavorites";
 import { AppOrder, getAppOrders } from "../../lib/orders";
-import { GOOGLE_AUTH_CONFIG } from "../../lib/google-auth-config";
+import {
+  GOOGLE_AUTH_CONFIG,
+  getGoogleAuthConfigError,
+} from "../../lib/google-auth-config";
 import {
   CheckoutProfile,
   fetchCurrentUser,
@@ -249,6 +252,13 @@ export default function ProfileScreen() {
   const [formPostalCode, setFormPostalCode] = useState("");
 
   useEffect(() => {
+    const configError = getGoogleAuthConfigError();
+
+    if (configError) {
+      console.log("GOOGLE AUTH CONFIG ERROR:", configError);
+      return;
+    }
+
     GoogleSignin.configure({
       webClientId: GOOGLE_AUTH_CONFIG.webClientId,
       iosClientId: GOOGLE_AUTH_CONFIG.iosClientId,
@@ -455,6 +465,13 @@ export default function ProfileScreen() {
 
   async function handleGoogleLogin() {
     if (googleLoading || appleLoading || submitting) return;
+
+    const configError = getGoogleAuthConfigError();
+
+    if (configError) {
+      Alert.alert("Google no está configurado", configError);
+      return;
+    }
 
     try {
       setGoogleLoading(true);
