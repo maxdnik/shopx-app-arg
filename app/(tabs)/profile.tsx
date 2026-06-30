@@ -259,12 +259,18 @@ export default function ProfileScreen() {
       return;
     }
 
-    GoogleSignin.configure({
-      webClientId: GOOGLE_AUTH_CONFIG.webClientId,
-      iosClientId: GOOGLE_AUTH_CONFIG.iosClientId,
+    const googleSignInConfig: Parameters<typeof GoogleSignin.configure>[0] = {
       offlineAccess: false,
       scopes: ["profile", "email"],
-    });
+    };
+
+    if (Platform.OS === "ios") {
+      googleSignInConfig.iosClientId = GOOGLE_AUTH_CONFIG.iosClientId;
+    } else {
+      googleSignInConfig.webClientId = GOOGLE_AUTH_CONFIG.webClientId;
+    }
+
+    GoogleSignin.configure(googleSignInConfig);
   }, []);
 
   function hydrateForm(nextUser: ShopXUser | null) {

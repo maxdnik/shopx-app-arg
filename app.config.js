@@ -69,11 +69,10 @@ module.exports = ({ config }) => {
     delete infoPlist.GIDClientID;
   }
 
-  if (googleWebClientId) {
-    infoPlist.GIDServerClientID = googleWebClientId;
-  } else {
-    delete infoPlist.GIDServerClientID;
-  }
+  // En iOS dejamos solo GIDClientID.
+  // No seteamos GIDServerClientID porque si el Web OAuth Client ID es rechazado,
+  // Google bloquea el login antes de que la app llegue al backend.
+  delete infoPlist.GIDServerClientID;
 
   const plugins = (expo.plugins || []).filter((plugin) => {
     const name = Array.isArray(plugin) ? plugin[0] : plugin;
