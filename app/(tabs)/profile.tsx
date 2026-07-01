@@ -1202,24 +1202,24 @@ export default function ProfileScreen() {
               <Text style={styles.whatsappButtonText}>Hablar con ShopX</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.deleteAccountButton} onPress={handleLogout}>
+              <Feather name="log-out" size={18} color="#C53030" />
+              <Text style={styles.deleteAccountText}>Cerrar sesión</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
-              style={[styles.deleteAccountButton, deletingAccount && styles.buttonDisabled]}
+              style={[styles.logoutButton, deletingAccount && styles.buttonDisabled]}
               onPress={confirmDeleteAccount}
               disabled={deletingAccount}
             >
               {deletingAccount ? (
-                <ActivityIndicator color="#C53030" />
+                <ActivityIndicator color={muted} />
               ) : (
                 <>
-                  <Feather name="trash-2" size={18} color="#C53030" />
-                  <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
+                  <Feather name="trash-2" size={18} color={muted} />
+                  <Text style={styles.logoutText}>Eliminar cuenta</Text>
                 </>
               )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Feather name="log-out" size={18} color={muted} />
-              <Text style={styles.logoutText}>Cerrar sesión</Text>
             </TouchableOpacity>
           </>
         ) : (

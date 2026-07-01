@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import {
@@ -16,8 +16,8 @@ import {
   View,
 } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { getStoredUser } from "../../lib/auth";
+import { router, useFocusEffect } from "expo-router";
+import { getCurrentUser } from "../../lib/auth";
 import {
   CustomerQuote,
   QuoteProductPayload,
@@ -112,7 +112,7 @@ export default function QuoteScreen() {
   const loadQuotes = useCallback(async (silent = false) => {
     if (!silent) setLoadingQuotes(true);
     try {
-      const user = await getStoredUser();
+      const user = await getCurrentUser();
       setIsLoggedIn(Boolean(user));
       if (!user) {
         setQuotes([]);
@@ -129,9 +129,11 @@ export default function QuoteScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadQuotes(true);
-  }, [loadQuotes]);
+  useFocusEffect(
+    useCallback(() => {
+      loadQuotes(true);
+    }, [loadQuotes])
+  );
 
   function updateProduct(localId: string, patch: Partial<QuoteFormProduct>) {
     setProducts((current) => current.map((product) => (product.localId === localId ? { ...product, ...patch } : product)));
