@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   RefreshControl,
   useWindowDimensions,
   ScrollView,
@@ -539,6 +540,7 @@ export default function ProductDetailScreen() {
 
   const [product, setProduct] = useState<ShopXProduct | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<ShopXProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -734,6 +736,18 @@ export default function ProductDetailScreen() {
     setActiveImageIndex(0);
   }
 
+  function openImagePreview(uri?: string | null) {
+    const cleanUri = String(uri || "").trim();
+
+    if (!cleanUri) return;
+
+    setImagePreviewUri(cleanUri);
+  }
+
+  function closeImagePreview() {
+    setImagePreviewUri(null);
+  }
+
   async function handleAddToCart() {
     if (!product || addingToCart || variantPricingLoading) return;
 
@@ -857,7 +871,17 @@ export default function ProductDetailScreen() {
                     key={`${uri}-${index}`}
                     style={[styles.imageSlide, { width: imageCardWidth }]}
                   >
-                    <Image source={{ uri }} style={styles.productImage} />
+                    <TouchableOpacity
+                      activeOpacity={0.92}
+                      style={styles.productImageButton}
+                      onPress={() => openImagePreview(uri)}
+                    >
+                      <Image source={{ uri }} style={styles.productImage} />
+                      <View style={styles.zoomHint}>
+                        <Feather name="maximize-2" size={14} color={navy} />
+                        <Text style={styles.zoomHintText}>Ampliar</Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
                 ))}
               </ScrollView>
@@ -877,7 +901,17 @@ export default function ProductDetailScreen() {
               ) : null}
             </>
           ) : imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={styles.productImage} />
+            <TouchableOpacity
+              activeOpacity={0.92}
+              style={styles.productImageButton}
+              onPress={() => openImagePreview(imageUrl)}
+            >
+              <Image source={{ uri: imageUrl }} style={styles.productImage} />
+              <View style={styles.zoomHint}>
+                <Feather name="maximize-2" size={14} color={navy} />
+                <Text style={styles.zoomHintText}>Ampliar</Text>
+              </View>
+            </TouchableOpacity>
           ) : (
             <MaterialCommunityIcons
               name="package-variant-closed"
@@ -1151,6 +1185,52 @@ export default function ProductDetailScreen() {
       </ScrollView>
 
       <AppBottomNav />
+
+      <Modal
+        visible={Boolean(imagePreviewUri)}
+        transparent
+        animationType="fade"
+        onRequestClose={closeImagePreview}
+      >
+        <View style={styles.imagePreviewOverlay}>
+          <View style={styles.imagePreviewTopBar}>
+            <TouchableOpacity
+              activeOpacity={0.86}
+              style={styles.imagePreviewCloseButton}
+              onPress={closeImagePreview}
+            >
+              <Feather name="x" size={25} color={white} />
+            </TouchableOpacity>
+
+            <Text style={styles.imagePreviewTitle}>Imagen del producto</Text>
+
+            <View style={styles.imagePreviewTopSpacer} />
+          </View>
+
+          <ScrollView
+            style={styles.imagePreviewScroll}
+            contentContainerStyle={styles.imagePreviewContent}
+            maximumZoomScale={4}
+            minimumZoomScale={1}
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            bouncesZoom
+            centerContent
+          >
+            {imagePreviewUri ? (
+              <Image
+                source={{ uri: imagePreviewUri }}
+                style={[styles.imagePreviewImage, { width: screenWidth, height: screenWidth }]}
+              />
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.imagePreviewFooter}>
+            <Feather name="zoom-in" size={16} color={white} />
+            <Text style={styles.imagePreviewFooterText}>Pellizcá la imagen para hacer zoom</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1249,10 +1329,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  productImageButton: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   productImage: {
     width: "86%",
     height: "82%",
     resizeMode: "contain",
+  },
+  zoomHint: {
+    position: "absolute",
+    right: 16,
+    bottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(226,232,240,0.95)",
+  },
+  zoomHintText: {
+    color: navy,
+    fontSize: 11,
+    fontWeight: "900",
   },
   imageDots: {
     position: "absolute",
@@ -1732,6 +1837,65 @@ const styles = StyleSheet.create({
     color: accent,
     fontSize: 14,
     fontWeight: "900",
+  },
+  imagePreviewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(3,17,31,0.96)",
+  },
+  imagePreviewTopBar: {
+    minHeight: 104,
+    paddingTop: 54,
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  imagePreviewCloseButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  imagePreviewTitle: {
+    flex: 1,
+    marginHorizontal: 12,
+    color: white,
+    fontSize: 16,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  imagePreviewTopSpacer: {
+    width: 46,
+    height: 46,
+  },
+  imagePreviewScroll: {
+    flex: 1,
+  },
+  imagePreviewContent: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 24,
+  },
+  imagePreviewImage: {
+    resizeMode: "contain",
+  },
+  imagePreviewFooter: {
+    minHeight: 82,
+    paddingBottom: 30,
+    paddingHorizontal: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  imagePreviewFooterText: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
   },
   relatedRow: {
     paddingLeft: 18,
