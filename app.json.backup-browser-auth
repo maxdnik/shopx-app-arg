@@ -5,7 +5,10 @@
     "version": "1.1.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "shopxapp",
+    "scheme": [
+      "shopxapp",
+      "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -14,7 +17,17 @@
       "buildNumber": "13",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "shopxapp",
+              "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
+            ]
+          }
+        ],
+        "GIDClientID": "935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc.apps.googleusercontent.com",
+        "GIDServerClientID": "935352834479-pdl30nl91se82noe814lup4gv4o9or03.apps.googleusercontent.com"
       }
     },
     "android": {
@@ -51,6 +64,12 @@
       "expo-font",
       "expo-apple-authentication",
       "expo-notifications",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.935352834479-alqde8iks44c9l892mm1nmrrmt65vdgqc"
+        }
+      ],
       [
         "expo-build-properties",
         {

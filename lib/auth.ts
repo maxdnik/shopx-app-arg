@@ -176,6 +176,58 @@ export async function loginApp(payload: LoginPayload): Promise<ShopXUser> {
   return data.user;
 }
 
+
+function getUrlParam(url: string, name: string) {
+  const queryStart = url.indexOf("?");
+  const hashStart = url.indexOf("#");
+
+  let query = "";
+
+  if (queryStart >= 0) {
+    const end = hashStart >= 0 && hashStart > queryStart ? hashStart : url.length;
+    query = url.slice(queryStart + 1, end);
+  } else if (hashStart >= 0) {
+    const hash = url.slice(hashStart + 1);
+    const hashQueryStart = hash.indexOf("?");
+    query = hashQueryStart >= 0 ? hash.slice(hashQueryStart + 1) : hash;
+  }
+
+  const params = new URLSearchParams(query);
+  return params.get(name) || "";
+}
+
+export function buildGoogleOAuthStartUrl(returnUrl: string) {
+  const encodedReturnUrl = encodeURIComponent(returnUrl);
+  return buildApiUrl(`/api/app/auth/google/start?returnUrl=${encodedReturnUrl}`);
+}
+
+export async function completeGoogleBrowserLogin(
+  callbackUrl: string
+): Promise<ShopXUser> {
+  const error = getUrlParam(callbackUrl, "error");
+
+  if (error) {
+    throw new Error(decodeURIComponent(error));
+  }
+
+  const token = getUrlParam(callbackUrl, "token");
+
+  if (!token) {
+    throw new Error("Google no devolvió una sesión válida.");
+  }
+
+  await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+
+  const user = await fetchCurrentUser();
+
+  if (!user) {
+    await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+    throw new Error("No pudimos cargar tu usuario ShopX.");
+  }
+
+  return user;
+}
+
 export async function loginWithGoogleApp(
   payload: GoogleLoginPayload
 ): Promise<ShopXUser> {

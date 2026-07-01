@@ -15,29 +15,20 @@ import {
   View,
 } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import {
-  GoogleSignin,
-  isCancelledResponse,
-  isErrorWithCode,
-  isSuccessResponse,
-  statusCodes,
-} from "@react-native-google-signin/google-signin";
 import * as WebBrowser from "expo-web-browser";
+import * as ExpoLinking from "expo-linking";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { useFavorites } from "../../hooks/useFavorites";
 import { AppOrder, getAppOrders } from "../../lib/orders";
-import {
-  GOOGLE_AUTH_CONFIG,
-  getGoogleAuthConfigError,
-} from "../../lib/google-auth-config";
 import {
   CheckoutProfile,
   fetchCurrentUser,
   getAppAccount,
   getStoredUser,
   loginApp,
-  loginWithGoogleApp,
+  buildGoogleOAuthStartUrl,
+  completeGoogleBrowserLogin,
   loginWithAppleApp,
   logoutApp,
   deleteAppAccount,
@@ -251,28 +242,6 @@ export default function ProfileScreen() {
   const [formProvince, setFormProvince] = useState("");
   const [formPostalCode, setFormPostalCode] = useState("");
 
-  useEffect(() => {
-    const configError = getGoogleAuthConfigError();
-
-    if (configError) {
-      console.log("GOOGLE AUTH CONFIG ERROR:", configError);
-      return;
-    }
-
-    const googleSignInConfig: Parameters<typeof GoogleSignin.configure>[0] = {
-      offlineAccess: false,
-      scopes: ["profile", "email"],
-    };
-
-    if (Platform.OS === "ios") {
-      googleSignInConfig.iosClientId = GOOGLE_AUTH_CONFIG.iosClientId;
-    } else {
-      googleSignInConfig.webClientId = GOOGLE_AUTH_CONFIG.webClientId;
-    }
-
-    GoogleSignin.configure(googleSignInConfig);
-  }, []);
-
   function hydrateForm(nextUser: ShopXUser | null) {
     if (!nextUser) return;
 
@@ -472,53 +441,26 @@ export default function ProfileScreen() {
   async function handleGoogleLogin() {
     if (googleLoading || appleLoading || submitting) return;
 
-    const configError = getGoogleAuthConfigError();
-
-    if (configError) {
-      Alert.alert("Google no está configurado", configError);
-      return;
-    }
-
     try {
       setGoogleLoading(true);
 
-      if (Platform.OS === "android") {
-        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      }
+      const returnUrl = ExpoLinking.createURL("auth/google/callback");
+      const authUrl = buildGoogleOAuthStartUrl(returnUrl);
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
 
-      await GoogleSignin.signOut().catch(() => undefined);
-      const response = await GoogleSignin.signIn();
-
-      if (isCancelledResponse(response)) {
+      if (result.type === "cancel" || result.type === "dismiss") {
         return;
       }
 
-      if (!isSuccessResponse(response)) {
+      if (result.type !== "success" || !result.url) {
         throw new Error("Google no devolvió una sesión válida.");
       }
 
-      const idToken = response.data.idToken;
-
-      if (!idToken) {
-        throw new Error("Google no devolvió el token de sesión.");
-      }
-
-      const loggedUser = await loginWithGoogleApp({ idToken });
+      const loggedUser = await completeGoogleBrowserLogin(result.url);
       await hydrateAccountAfterAuth(loggedUser);
 
       Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
     } catch (error: any) {
-      if (isErrorWithCode(error)) {
-        if (error.code === statusCodes.IN_PROGRESS) return;
-        if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-          Alert.alert(
-            "Google Play Services no disponible",
-            "Actualizá Google Play Services e intentá nuevamente."
-          );
-          return;
-        }
-      }
-
       Alert.alert(
         "No pudimos iniciar sesión con Google",
         error?.message || "Intentá nuevamente."
