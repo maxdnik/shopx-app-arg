@@ -86,6 +86,8 @@ export type ShopXProduct = {
   weeklyPick?: boolean;
   weeklyPickOrder?: number;
   weeklyPickUpdatedAt?: string;
+  homePlacement?: "auto" | "clothing" | "technology" | "toys" | "outdoor" | "hidden";
+  homeOrder?: number;
   pricing?: ProductPricing;
 };
 
@@ -815,6 +817,37 @@ export async function getProducts(
   return hydrateProductsWithResolvedPricing(data.products, destination);
 }
 
+
+
+export type HomeSectionKey = "clothing" | "technology" | "toys" | "outdoor";
+
+export type HomeSectionsResponse = Record<HomeSectionKey, ShopXProduct[]>;
+
+export async function getHomeSections(
+  destination?: DomesticPricingDestination,
+): Promise<HomeSectionsResponse> {
+  const response = await fetch(buildApiUrl("/api/app/home-sections"));
+
+  if (!response.ok) {
+    throw new Error("No se pudieron obtener las secciones del home");
+  }
+
+  const data = await response.json();
+
+  if (!data?.ok || !data?.sections) {
+    throw new Error("Respuesta inválida de /api/app/home-sections");
+  }
+
+  const keys: HomeSectionKey[] = ["clothing", "technology", "toys", "outdoor"];
+  const result = {} as HomeSectionsResponse;
+
+  for (const key of keys) {
+    const products = Array.isArray(data.sections[key]) ? data.sections[key] : [];
+    result[key] = await hydrateProductsWithResolvedPricing(products, destination);
+  }
+
+  return result;
+}
 
 export async function getWeeklyMostRequestedProducts(
   limit = 10,

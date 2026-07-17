@@ -22,11 +22,14 @@ import {
   formatUSD,
   getDisplayFinalPriceUSD,
   getProductImage,
+  getHomeSections,
   getProducts,
   getWeeklyMostRequestedProducts,
+  HomeSectionsResponse,
   searchProducts,
   ShopXProduct,
 } from "../../lib/api";
+import { saveProductToCache } from "../../lib/product-cache";
 import { getAppAccount, getStoredUser, ShopXUser } from "../../lib/auth";
 import { getOfficialStores, ShopXStore } from "../../lib/stores";
 import {
@@ -34,7 +37,6 @@ import {
   getStoreLogoSource,
   getStoreLogoWordmark,
 } from "../../lib/store-logos";
-import { openShopXProduct } from "../../lib/product-navigation";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -56,12 +58,49 @@ const categories = [
   { icon: "shoe-sneaker", label: "Deportes", type: "material" },
 ];
 
+const HOME_PRODUCTS_LOAD_LIMIT = 60;
+
+const EMPTY_HOME_SECTIONS: HomeSectionsResponse = {
+  clothing: [],
+  technology: [],
+  toys: [],
+  outdoor: [],
+};
+
+const homeCategorySections = [
+  { key: "clothing" as const, title: "Ropa", viewAllText: "Ver ropa", categoryParam: "Moda" },
+  { key: "technology" as const, title: "Tecnología", viewAllText: "Ver tecnología", categoryParam: "Tecnología" },
+  { key: "toys" as const, title: "Juguetes", viewAllText: "Ver juguetes", categoryParam: "Juguetes" },
+  { key: "outdoor" as const, title: "Outdoor", viewAllText: "Ver outdoor", categoryParam: "Deportes" },
+];
+
 function getProductSlug(product: ShopXProduct) {
   return product.slug || product._id || product.id || product.externalId || "";
 }
 
+function isEbayProduct(product: ShopXProduct) {
+  const source = String(product.source || "").toLowerCase();
+  const store = String(product.store || "").toLowerCase();
+  const sourceUrl = String(product.sourceUrl || "").toLowerCase();
+
+  return (
+    source.includes("ebay") ||
+    store.includes("ebay") ||
+    sourceUrl.includes("ebay.com")
+  );
+}
+
 function openProduct(product: ShopXProduct) {
-  openShopXProduct(product);
+  const slug = getProductSlug(product);
+  if (!slug) return;
+
+  saveProductToCache(product);
+
+  const pathname = isEbayProduct(product)
+    ? `/ebay-product/${encodeURIComponent(slug)}`
+    : `/product/${encodeURIComponent(slug)}`;
+
+  router.push(pathname as any);
 }
 
 function getUserCity(user: ShopXUser | null) {
@@ -124,6 +163,7 @@ function sortProductsByWeeklyPickOrder(products: ShopXProduct[]) {
 }
 
 
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const cartCount = useCartCount();
@@ -132,6 +172,8 @@ export default function HomeScreen() {
 
   const [products, setProducts] = useState<ShopXProduct[]>([]);
   const [weeklyProducts, setWeeklyProducts] = useState<ShopXProduct[]>([]);
+  const [homeSections, setHomeSections] = useState<HomeSectionsResponse>(EMPTY_HOME_SECTIONS);
+  const [homeSectionsLoading, setHomeSectionsLoading] = useState(true);
   const [stores, setStores] = useState<ShopXStore[]>([]);
   const [searchResults, setSearchResults] = useState<ShopXProduct[]>([]);
   const [homeSearch, setHomeSearch] = useState("");
@@ -162,27 +204,35 @@ export default function HomeScreen() {
     });
   }
 
+
   async function loadProducts() {
     setLoading(true);
+    setHomeSectionsLoading(true);
     setErrorMessage("");
 
     try {
-      const [result, weeklyResult] = await Promise.all([
-        getProducts(100),
+      const [result, weeklyResult, sectionsResult] = await Promise.all([
+        getProducts(HOME_PRODUCTS_LOAD_LIMIT),
         getWeeklyMostRequestedProducts(10).catch((error) => {
           console.log("ERROR HOME WEEKLY PRODUCTS:", error);
           return [] as ShopXProduct[];
+        }),
+        getHomeSections().catch((error) => {
+          console.log("ERROR HOME CURATED SECTIONS:", error);
+          return EMPTY_HOME_SECTIONS;
         }),
       ]);
 
       setProducts(result);
       setWeeklyProducts(weeklyResult);
+      setHomeSections(sectionsResult);
     } catch (error) {
       console.log("ERROR HOME PRODUCTS:", error);
       setErrorMessage("No pudimos cargar los productos.");
+    } finally {
+      setLoading(false);
+      setHomeSectionsLoading(false);
     }
-
-    setLoading(false);
   }
 
   async function loadDeliveryProfile() {
@@ -247,22 +297,32 @@ export default function HomeScreen() {
     return () => clearTimeout(timeout);
   }, [homeSearch]);
 
+  const databaseProducts = useMemo(
+    () => products.filter((product) => !isEbayProduct(product)),
+    [products],
+  );
+
   const mostRequestedProducts = useMemo(() => {
-    if (weeklyProducts.length > 0) {
-      return sortProductsByWeeklyPickOrder(weeklyProducts).slice(0, 10);
+    const internalWeeklyProducts = weeklyProducts.filter(
+      (product) => !isEbayProduct(product),
+    );
+
+    if (internalWeeklyProducts.length > 0) {
+      return sortProductsByWeeklyPickOrder(internalWeeklyProducts).slice(0, 10);
     }
 
-    return products.slice(0, 10);
-  }, [products, weeklyProducts]);
-  const featuredProducts = useMemo(() => {
-    const highlighted = products.slice(10, 16);
-    return highlighted.length > 0 ? highlighted : products.slice(0, 6);
-  }, [products]);
-  const curatedProducts = useMemo(() => {
-    const curated = products.slice(16, 24);
-    return curated.length > 0 ? curated : products.slice(6, 14);
-  }, [products]);
-  const heroProduct = products[0];
+    return databaseProducts.slice(0, 10);
+  }, [databaseProducts, weeklyProducts]);
+
+  const categorySections = useMemo(
+    () =>
+      homeCategorySections.map((section) => ({
+        ...section,
+        products: homeSections[section.key] || [],
+      })),
+    [homeSections],
+  );
+  const heroProduct = databaseProducts[0];
   const visibleProducts = searchResults;
   const heroImage = heroProduct ? getProductImage(heroProduct) : "";
   const locationText = deliveryLabel || "Configurar ubicación";
@@ -823,73 +883,63 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </LinearGradient>
 
-            <View style={styles.sectionHeaderSimple}>
-              <Text style={styles.sectionTitle}>Destacados</Text>
+            {categorySections.map((section) => (
+              <View key={section.title} style={styles.homeCategoryBlock}>
+                <View style={styles.sectionHeaderSimple}>
+                  <Text style={styles.sectionTitle}>{section.title}</Text>
 
-              <TouchableOpacity
-                style={styles.viewAllButton}
-                onPress={() => router.push("/categories")}
-              >
-                <Text style={styles.viewAll}>Ver todo</Text>
-                <Feather name="chevron-right" size={22} color={accent} />
-              </TouchableOpacity>
-            </View>
+                  <TouchableOpacity
+                    style={styles.viewAllButton}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/categories",
+                        params: { category: section.categoryParam },
+                      })
+                    }
+                  >
+                    <Text style={styles.viewAll}>{section.viewAllText}</Text>
+                    <Feather name="chevron-right" size={22} color={accent} />
+                  </TouchableOpacity>
+                </View>
 
-            <View style={styles.productsGrid}>
-              {featuredProducts.slice(0, 6).map((product, index) => {
-                const key =
-                  product._id ||
-                  product.id ||
-                  product.slug ||
-                  `featured-${product.title}-${index}`;
-
-                return (
-                  <View key={key} style={styles.productGridItem}>
-                    <ProductCard
-                      product={product}
-                      variant="deal"
-                      onPress={() => openProduct(product)}
-                    />
+                {homeSectionsLoading && section.products.length === 0 ? (
+                  <View style={styles.loadingBoxCompact}>
+                    <ActivityIndicator color={navy} />
+                    <Text style={styles.loadingText}>Cargando {section.title.toLowerCase()}...</Text>
                   </View>
-                );
-              })}
-            </View>
+                ) : section.products.length > 0 ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.horizontalProductsRow}
+                  >
+                    {section.products.map((product, index) => {
+                      const key =
+                        product._id ||
+                        product.id ||
+                        product.slug ||
+                        `${section.title}-${product.title}-${index}`;
 
-            <View style={styles.sectionHeaderSimple}>
-              <Text style={styles.sectionTitle}>Curado por ShopX</Text>
-
-              <TouchableOpacity
-                style={styles.viewAllButton}
-                onPress={() => router.push("/categories")}
-              >
-                <Text style={styles.viewAll}>Ver todo</Text>
-                <Feather name="chevron-right" size={22} color={accent} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.productsGrid}>
-              {(curatedProducts.length > 0
-                ? curatedProducts
-                : featuredProducts
-              ).map((product, index) => {
-                const key =
-                  product._id ||
-                  product.id ||
-                  product.slug ||
-                  `curated-${product.title}-${index}`;
-
-                return (
-                  <View key={key} style={styles.productGridItem}>
-                    <ProductCard
-                      product={product}
-                      variant="compact"
-                      showCartButton={false}
-                      onPress={() => openProduct(product)}
-                    />
+                      return (
+                        <View key={key} style={styles.horizontalProductItem}>
+                          <ProductCard
+                            product={product}
+                            variant="deal"
+                            onPress={() => openProduct(product)}
+                          />
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                ) : (
+                  <View style={styles.emptyCategoryBox}>
+                    <Text style={styles.emptyCategoryText}>
+                      Todavía no seleccionaste productos para esta sección desde el panel de administración.
+                    </Text>
                   </View>
-                );
-              })}
-            </View>
+                )}
+              </View>
+            ))}
           </>
         )}
 
@@ -1595,6 +1645,34 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 
+
+  loadingBoxCompact: {
+    minHeight: 92,
+    marginHorizontal: 18,
+    borderRadius: 20,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#E3EBF3",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+
+  emptyCategoryBox: {
+    marginHorizontal: 18,
+    padding: 18,
+    borderRadius: 20,
+    backgroundColor: white,
+    borderWidth: 1,
+    borderColor: "#E3EBF3",
+  },
+
+  emptyCategoryText: {
+    color: muted,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
   loadingBox: {
     marginHorizontal: 22,
     borderRadius: 24,
@@ -1692,6 +1770,10 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
     rowGap: 0.2,
+  },
+
+  homeCategoryBlock: {
+    marginTop: 4,
   },
 
   productGridItem: {
