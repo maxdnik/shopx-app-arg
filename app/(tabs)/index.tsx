@@ -210,28 +210,55 @@ export default function HomeScreen() {
     setHomeSectionsLoading(true);
     setErrorMessage("");
 
+    const sectionsPromise = getHomeSections()
+      .then((sectionsResult) => {
+        setHomeSections(sectionsResult);
+        return sectionsResult;
+      })
+      .catch((error) => {
+        console.log("ERROR HOME CURATED SECTIONS:", error);
+        setHomeSections(EMPTY_HOME_SECTIONS);
+        return EMPTY_HOME_SECTIONS;
+      })
+      .finally(() => {
+        setHomeSectionsLoading(false);
+      });
+
+    const weeklyPromise = getWeeklyMostRequestedProducts(10)
+      .then((weeklyResult) => {
+        setWeeklyProducts(weeklyResult);
+        return weeklyResult;
+      })
+      .catch((error) => {
+        console.log("ERROR HOME WEEKLY PRODUCTS:", error);
+        setWeeklyProducts([]);
+        return [] as ShopXProduct[];
+      });
+
     try {
-      const [result, weeklyResult, sectionsResult] = await Promise.all([
-        getProducts(HOME_PRODUCTS_LOAD_LIMIT),
-        getWeeklyMostRequestedProducts(10).catch((error) => {
-          console.log("ERROR HOME WEEKLY PRODUCTS:", error);
-          return [] as ShopXProduct[];
-        }),
-        getHomeSections().catch((error) => {
-          console.log("ERROR HOME CURATED SECTIONS:", error);
-          return EMPTY_HOME_SECTIONS;
-        }),
+      const [sectionsResult, weeklyResult] = await Promise.all([
+        sectionsPromise,
+        weeklyPromise,
       ]);
 
-      setProducts(result);
-      setWeeklyProducts(weeklyResult);
-      setHomeSections(sectionsResult);
-    } catch (error) {
-      console.log("ERROR HOME PRODUCTS:", error);
-      setErrorMessage("No pudimos cargar los productos.");
+      const hasHomeSections = Object.values(sectionsResult).some(
+        (section) => section.length > 0,
+      );
+
+      if (!hasHomeSections || weeklyResult.length === 0) {
+        try {
+          const fallbackProducts = await getProducts(HOME_PRODUCTS_LOAD_LIMIT);
+          setProducts(fallbackProducts);
+        } catch (fallbackError) {
+          console.log("ERROR HOME FALLBACK PRODUCTS:", fallbackError);
+
+          if (!hasHomeSections && weeklyResult.length === 0) {
+            setErrorMessage("No pudimos cargar los productos.");
+          }
+        }
+      }
     } finally {
       setLoading(false);
-      setHomeSectionsLoading(false);
     }
   }
 

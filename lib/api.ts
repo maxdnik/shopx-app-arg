@@ -823,9 +823,7 @@ export type HomeSectionKey = "clothing" | "technology" | "toys" | "outdoor";
 
 export type HomeSectionsResponse = Record<HomeSectionKey, ShopXProduct[]>;
 
-export async function getHomeSections(
-  destination?: DomesticPricingDestination,
-): Promise<HomeSectionsResponse> {
+export async function getHomeSections(): Promise<HomeSectionsResponse> {
   const response = await fetch(buildApiUrl("/api/app/home-sections"));
 
   if (!response.ok) {
@@ -838,37 +836,46 @@ export async function getHomeSections(
     throw new Error("Respuesta inválida de /api/app/home-sections");
   }
 
-  const keys: HomeSectionKey[] = ["clothing", "technology", "toys", "outdoor"];
-  const result = {} as HomeSectionsResponse;
-
-  for (const key of keys) {
-    const products = Array.isArray(data.sections[key]) ? data.sections[key] : [];
-    result[key] = await hydrateProductsWithResolvedPricing(products, destination);
-  }
-
-  return result;
+  return {
+    clothing: Array.isArray(data.sections.clothing)
+      ? data.sections.clothing
+      : [],
+    technology: Array.isArray(data.sections.technology)
+      ? data.sections.technology
+      : [],
+    toys: Array.isArray(data.sections.toys)
+      ? data.sections.toys
+      : [],
+    outdoor: Array.isArray(data.sections.outdoor)
+      ? data.sections.outdoor
+      : [],
+  };
 }
 
 export async function getWeeklyMostRequestedProducts(
   limit = 10,
-  destination?: DomesticPricingDestination
 ): Promise<ShopXProduct[]> {
   const response = await fetch(
-    buildApiUrl(`/api/app/products?collection=weekly-most-requested&limit=${limit}`)
+    buildApiUrl(
+      `/api/app/products?collection=weekly-most-requested&limit=${limit}`,
+    ),
   );
 
   if (!response.ok) {
-    throw new Error("No se pudieron obtener los productos más pedidos de la semana");
+    throw new Error(
+      "No se pudieron obtener los productos más pedidos de la semana",
+    );
   }
 
   const data = await response.json();
 
   if (!data?.ok || !Array.isArray(data.products)) {
-    throw new Error("Respuesta inválida de /api/app/products weekly-most-requested");
+    throw new Error(
+      "Respuesta inválida de /api/app/products weekly-most-requested",
+    );
   }
 
-  const hydratedProducts = await hydrateProductsWithResolvedPricing(data.products, destination);
-  return sortProductsByWeeklyPickOrder(hydratedProducts).slice(0, limit);
+  return sortProductsByWeeklyPickOrder(data.products).slice(0, limit);
 }
 
 export async function searchProducts(
