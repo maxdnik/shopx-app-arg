@@ -27,6 +27,7 @@ import {
   getStoreLogoSource,
   getStoreLogoWordmark,
 } from "../../lib/store-logos";
+import { openShopXProduct } from "../../lib/product-navigation";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -121,9 +122,8 @@ export default function StoreScreen() {
   }, [storeSlug]);
 
   function openProduct(product: ShopXProduct) {
-    if (!product.slug) return;
-    router.push(`/product/${product.slug}`);
-  }
+  openShopXProduct(product);
+}
 
   function openSearch() {
     router.push({

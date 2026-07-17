@@ -27,7 +27,6 @@ import {
   searchProducts,
   ShopXProduct,
 } from "../../lib/api";
-import { saveProductToCache } from "../../lib/product-cache";
 import { getAppAccount, getStoredUser, ShopXUser } from "../../lib/auth";
 import { getOfficialStores, ShopXStore } from "../../lib/stores";
 import {
@@ -35,6 +34,7 @@ import {
   getStoreLogoSource,
   getStoreLogoWordmark,
 } from "../../lib/store-logos";
+import { openShopXProduct } from "../../lib/product-navigation";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -61,11 +61,7 @@ function getProductSlug(product: ShopXProduct) {
 }
 
 function openProduct(product: ShopXProduct) {
-  const slug = getProductSlug(product);
-  if (!slug) return;
-
-  saveProductToCache(product);
-  router.push(`/product/${slug}`);
+  openShopXProduct(product);
 }
 
 function getUserCity(user: ShopXUser | null) {

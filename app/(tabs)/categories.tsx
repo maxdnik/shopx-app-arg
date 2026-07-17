@@ -15,7 +15,7 @@ import { AppBottomNav } from "../../components/AppBottomNav";
 import { ProductCard } from "../../components/ProductCard";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { getProductImage, getProducts, ShopXProduct } from "../../lib/api";
-import { saveProductToCache } from "../../lib/product-cache";
+import { openShopXProduct } from "../../lib/product-navigation";
 
 const navy = "#062B4F";
 const text = "#071E35";
@@ -368,11 +368,7 @@ function getProductSlug(product: ShopXProduct) {
 }
 
 function openProduct(product: ShopXProduct) {
-  const slug = getProductSlug(product);
-  if (!slug) return;
-
-  saveProductToCache(product);
-  router.push(`/product/${slug}`);
+  openShopXProduct(product);
 }
 
 function getSortPrice(product: ShopXProduct) {

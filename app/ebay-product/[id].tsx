@@ -49,6 +49,49 @@ function getBrand(product: ShopXProduct) {
   ).toUpperCase();
 }
 
+
+function buildEbayProductFromParams(
+  productId: string,
+  params: {
+    title?: string;
+    priceUSD?: string;
+    image?: string;
+    url?: string;
+    condition?: string;
+    seller?: string;
+  }
+): ShopXProduct | null {
+  const title = String(params.title || "").trim();
+  const sourceUrl = String(params.url || "").trim();
+  const image = String(params.image || "").trim();
+  const priceUSD = Number(params.priceUSD || 0) || 0;
+
+  if (!title && !sourceUrl && !image) return null;
+
+  return {
+    id: productId,
+    _id: productId,
+    slug: productId,
+    externalId: productId,
+    title: title || "Producto eBay",
+    source: "ebay",
+    store: "eBay",
+    brand: "eBay",
+    sourceUrl,
+    image: image || undefined,
+    images: image ? [image] : [],
+    imageUrls: image ? [image] : [],
+    priceUSD: priceUSD || undefined,
+    finalPriceUSD: priceUSD || undefined,
+    estimatedUSD: priceUSD || undefined,
+    category: "Producto USA",
+    sourceRaw: {
+      condition: params.condition || "",
+      seller: params.seller || "",
+    },
+  };
+}
+
 function isEbayProduct(product: ShopXProduct) {
   return (
     product.source === "ebay" ||
@@ -57,7 +100,16 @@ function isEbayProduct(product: ShopXProduct) {
 }
 
 export default function ProductDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    title?: string;
+    priceUSD?: string;
+    image?: string;
+    url?: string;
+    condition?: string;
+    seller?: string;
+  }>();
+  const { id } = params;
 
   const [product, setProduct] = useState<ShopXProduct | null>(null);
   const [totalItems, setTotalItems] = useState(0);
@@ -96,6 +148,14 @@ export default function ProductDetailScreen() {
         return;
       }
 
+      const productFromParams = buildEbayProductFromParams(productId, params);
+
+      if (productFromParams) {
+        setProduct(productFromParams);
+        setLoading(false);
+        return;
+      }
+
       try {
         const result = await getProductBySlug(productId);
 
@@ -115,7 +175,7 @@ export default function ProductDetailScreen() {
     }
 
     loadProduct();
-  }, [id]);
+  }, [id, params]);
 
   async function handleAddToCart() {
     if (!product) return;

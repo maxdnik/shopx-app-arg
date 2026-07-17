@@ -16,7 +16,7 @@ import { ProductCard } from "../components/ProductCard";
 import { useFavorites } from "../hooks/useFavorites";
 import { clearFavorites } from "../lib/favorites-store";
 import { ShopXProduct } from "../lib/api";
-import { saveProductToCache } from "../lib/product-cache";
+import { openShopXProduct } from "../lib/product-navigation";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -32,11 +32,7 @@ function getProductSlug(product: ShopXProduct) {
 }
 
 function openProduct(product: ShopXProduct) {
-  const slug = getProductSlug(product);
-  if (!slug) return;
-
-  saveProductToCache(product);
-  router.push(`/product/${slug}`);
+  openShopXProduct(product);
 }
 
 export default function FavoritesScreen() {
