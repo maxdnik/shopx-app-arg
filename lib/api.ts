@@ -905,6 +905,131 @@ export async function searchProducts(
   return hydrateProductsWithResolvedPricing(data.products, destination);
 }
 
+export type CatalogSubcategory = {
+  key: string;
+  label: string;
+  count: number;
+  image?: string;
+};
+
+export type CatalogCategory = {
+  key: string;
+  label: string;
+  count: number;
+  image?: string;
+  subcategories: CatalogSubcategory[];
+};
+
+export type CatalogNavigationResponse = {
+  categories: CatalogCategory[];
+  totalProducts: number;
+};
+
+export async function getCatalogNavigation(): Promise<CatalogNavigationResponse> {
+  const response = await fetch(
+    buildApiUrl("/api/app/catalog-navigation"),
+  );
+
+  if (!response.ok) {
+    throw new Error("No se pudo obtener la navegación del catálogo");
+  }
+
+  const data = await response.json();
+
+  if (!data?.ok || !Array.isArray(data.categories)) {
+    throw new Error(
+      "Respuesta inválida de /api/app/catalog-navigation",
+    );
+  }
+
+  return {
+    categories: data.categories,
+    totalProducts: Number(data.totalProducts || 0),
+  };
+}
+
+export type CatalogAudience = "all" | "men" | "women" | "kids";
+
+export type CatalogProductsRequest = {
+  category?: string;
+  subcategory?: string;
+  audience?: CatalogAudience;
+  query?: string;
+  page?: number;
+  limit?: number;
+  seed?: string;
+};
+
+export type CatalogProductsResponse = {
+  products: ShopXProduct[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasMore: boolean;
+  };
+};
+
+export async function getCatalogProducts({
+  category = "all",
+  subcategory,
+  audience = "all",
+  query,
+  page = 1,
+  limit = 24,
+  seed = "shopx",
+}: CatalogProductsRequest = {}): Promise<CatalogProductsResponse> {
+  const params = new URLSearchParams({
+    category,
+    audience,
+    page: String(Math.max(page, 1)),
+    limit: String(Math.min(Math.max(limit, 1), 48)),
+    seed,
+  });
+
+  if (subcategory) {
+    params.set("subcategory", subcategory);
+  }
+
+  if (query) {
+    params.set("query", query);
+  }
+
+  const response = await fetch(
+    buildApiUrl(`/api/app/catalog-products?${params.toString()}`),
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      "No se pudieron obtener los productos del catálogo",
+    );
+  }
+
+  const data = await response.json();
+
+  if (
+    !data?.ok ||
+    !Array.isArray(data.products) ||
+    !data?.pagination
+  ) {
+    throw new Error(
+      "Respuesta inválida de /api/app/catalog-products",
+    );
+  }
+
+  return {
+    products: data.products,
+    pagination: {
+      page: Number(data.pagination.page || 1),
+      limit: Number(data.pagination.limit || limit),
+      total: Number(data.pagination.total || 0),
+      totalPages: Number(data.pagination.totalPages || 0),
+      hasMore: Boolean(data.pagination.hasMore),
+    },
+  };
+}
+
 export async function getProductBySlug(
   slug: string,
   destination?: DomesticPricingDestination
