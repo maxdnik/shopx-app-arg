@@ -9,101 +9,62 @@ import { buildApiUrl } from "./config";
 
 export type SearchResult = {
   id: string;
-  source: "mongo" | "ebay";
+  source: "mongo" | "ebay" | "amazon";
   title: string;
   brand?: string;
   priceUSD?: number;
   finalPriceUSD?: number;
   estimatedUSD?: number;
   image?: string | null;
+  images?: string[];
   category?: string;
   condition?: string;
   seller?: string;
   url?: string;
   slug?: string;
+  asin?: string;
+  rating?: number;
+  reviewsCount?: number;
   pricing?: {
     finalUSD?: number;
     totalFinal?: number;
     totalWeightKg?: number;
     isWeightImputed?: boolean;
-    breakdown?: Array<{
-      label: string;
-      amount: number;
-    }>;
+    breakdown?: Array<{ label: string; amount: number }>;
   };
 };
 
 function toNumber(value: any) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
-    const clean = value.replace(/[^0-9.,]/g, "").replace(",", ".");
-    const numberValue = Number(clean);
-
-    return Number.isFinite(numberValue) ? numberValue : 0;
+    const clean = value.replace(/[^0-9.,]/g, "").replace(/,/g, "");
+    const parsed = Number(clean);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
-
   if (value && typeof value === "object") {
-    const possibleValue =
-      value.value ||
-      value.amount ||
-      value.price ||
-      value.currentPrice ||
-      value.convertedFromValue;
-
-    return toNumber(possibleValue);
+    return toNumber(value.value || value.amount || value.price || value.currentPrice);
   }
-
   return 0;
 }
 
 function getCategoryLabel(product: ShopXProduct) {
-  if (typeof product.category === "string") {
-    return product.category;
-  }
-
-  return (
-    product.category?.leaf ||
-    product.category?.sub ||
-    product.category?.main ||
-    "Producto USA"
-  );
-}
-
-function getEbayFinalPriceUSD(item: any) {
-  const finalPrice =
-    item?.finalPriceUSD ||
-    item?.estimatedUSD ||
-    item?.pricing?.finalUSD ||
-    item?.pricing?.totalFinal ||
-    item?.totalFinalUSD ||
-    item?.displayPriceUSD ||
-    item?.priceUSD ||
-    item?.price ||
-    0;
-
-  return toNumber(finalPrice);
+  if (typeof product.category === "string") return product.category;
+  return product.category?.leaf || product.category?.sub || product.category?.main || "Producto USA";
 }
 
 function normalizeInternalProduct(product: ShopXProduct): SearchResult {
   const finalPriceUSD = getDisplayFinalPriceUSD(product);
-
   return {
     id: String(product._id || product.id || product.slug),
     source: "mongo",
     title: product.title,
     brand: product.brand || product.store || "SHOPX",
-
-    // En SearchResult, priceUSD queda como compatibilidad,
-    // pero siempre cargado con precio final Argentina.
     priceUSD: finalPriceUSD,
     finalPriceUSD,
     estimatedUSD: product.estimatedUSD,
     pricing: product.pricing,
-
     image: getProductImage(product),
+    images: product.images || product.imageUrls,
     category: getCategoryLabel(product),
     slug: product.slug,
     url: product.sourceUrl,
@@ -111,62 +72,72 @@ function normalizeInternalProduct(product: ShopXProduct): SearchResult {
 }
 
 function normalizeEbayItem(item: any): SearchResult {
-  const finalPriceUSD = getEbayFinalPriceUSD(item);
-
+  const finalPriceUSD = toNumber(
+    item?.finalPriceUSD || item?.estimatedUSD || item?.pricing?.finalUSD ||
+      item?.pricing?.totalFinal || item?.totalFinalUSD || item?.displayPriceUSD ||
+      item?.priceUSD || item?.price
+  );
+  const image = item.image || item.imageUrl || item.thumbnail || item?.image?.imageUrl ||
+    item?.thumbnailImages?.[0]?.imageUrl || null;
   return {
     id: String(item.id || item.itemId || item.legacyItemId || item.url || item.title),
     source: "ebay",
     title: String(item.title || "Producto eBay"),
     brand: item.brand || "eBay",
-
-    // En SearchResult, priceUSD queda como compatibilidad,
-    // pero siempre intentamos cargarlo con precio final Argentina si la API lo trae.
     priceUSD: finalPriceUSD,
     finalPriceUSD,
     estimatedUSD: item.estimatedUSD ? toNumber(item.estimatedUSD) : finalPriceUSD,
     pricing: item.pricing,
-
-    image:
-      item.image ||
-      item.imageUrl ||
-      item.thumbnail ||
-      item?.image?.imageUrl ||
-      item?.thumbnailImages?.[0]?.imageUrl ||
-      null,
-
+    image,
+    images: image ? [image] : [],
     category: item.category || item.condition || "Producto eBay",
     condition: item.condition,
-    seller:
-      item.seller ||
-      item.sellerUsername ||
-      item?.seller?.username ||
-      item?.seller?.sellerUsername,
+    seller: item.seller || item.sellerUsername || item?.seller?.username || item?.seller?.sellerUsername,
     url: item.url || item.itemWebUrl || item.sourceUrl,
+  };
+}
+
+function normalizeAmazonItem(item: any): SearchResult {
+  const basePrice = toNumber(item.priceUSD || item.final_price || item.price || item.current_price);
+  const finalPrice = toNumber(
+    item.finalPriceUSD || item.estimatedUSD || item.pricing?.finalUSD ||
+      item.pricing?.totalFinal || item.totalFinalUSD || item.displayPriceUSD
+  );
+  const image = item.image || item.imageUrl || item.thumbnail || item.main_image ||
+    item.images?.[0] || item.image_urls?.[0] || null;
+  const asin = String(item.asin || item.id || "").trim();
+  return {
+    id: asin || String(item.url || item.title),
+    asin,
+    source: "amazon",
+    title: String(item.title || item.name || "Producto Amazon"),
+    brand: item.brand || item.store || "Amazon",
+    priceUSD: basePrice,
+    finalPriceUSD: finalPrice || basePrice,
+    estimatedUSD: finalPrice || undefined,
+    image,
+    images: Array.isArray(item.images) ? item.images : image ? [image] : [],
+    category: item.category || "Amazon",
+    condition: item.condition || "Nuevo",
+    seller: item.seller,
+    url: item.url || item.sourceUrl || (asin ? `https://www.amazon.com/dp/${asin}` : undefined),
+    rating: toNumber(item.rating),
+    reviewsCount: toNumber(item.reviewsCount || item.reviews_count || item.ratings_total),
+    pricing: item.pricing,
   };
 }
 
 async function searchInternalProducts(query: string) {
   try {
     const products = await searchProducts(query);
-
     return products.map(normalizeInternalProduct);
-  } catch (error) {
-    console.log("ERROR INTERNAL SEARCH:", error);
-
+  } catch {
     try {
-      const response = await fetch(
-        buildApiUrl(`/api/products?search=${encodeURIComponent(query)}`)
-      );
-
+      const response = await fetch(buildApiUrl(`/api/products?search=${encodeURIComponent(query)}`));
       if (!response.ok) return [];
-
       const data = await response.json();
-
-      if (!Array.isArray(data.products)) return [];
-
-      return data.products.map(normalizeInternalProduct);
-    } catch (fallbackError) {
-      console.log("ERROR INTERNAL SEARCH FALLBACK:", fallbackError);
+      return Array.isArray(data.products) ? data.products.map(normalizeInternalProduct) : [];
+    } catch {
       return [];
     }
   }
@@ -174,39 +145,45 @@ async function searchInternalProducts(query: string) {
 
 async function searchEbayProducts(query: string) {
   try {
-    const response = await fetch(
-      buildApiUrl(`/api/ebay/search?query=${encodeURIComponent(query)}`)
-    );
-
+    const response = await fetch(buildApiUrl(`/api/ebay/search?query=${encodeURIComponent(query)}`));
     if (!response.ok) return [];
-
     const data = await response.json();
-
-    const items =
-      data.items ||
-      data.products ||
-      data.results ||
-      data.ebayItems ||
-      [];
-
-    if (!Array.isArray(items)) return [];
-
-    return items.map(normalizeEbayItem);
-  } catch (error) {
-    console.log("ERROR EBAY SEARCH:", error);
+    const items = data.items || data.products || data.results || data.ebayItems || [];
+    return Array.isArray(items) ? items.map(normalizeEbayItem) : [];
+  } catch {
     return [];
   }
 }
 
+async function searchAmazonProducts(query: string) {
+  try {
+    const response = await fetch(buildApiUrl(`/api/search?query=${encodeURIComponent(query)}&limit=24`));
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data.products) ? data.products.map(normalizeAmazonItem) : [];
+  } catch {
+    return [];
+  }
+}
+
+function takeMixed(amazon: SearchResult[], internal: SearchResult[], ebay: SearchResult[]) {
+  const output: SearchResult[] = [];
+  const max = Math.max(amazon.length, internal.length, ebay.length);
+  for (let i = 0; i < max; i += 1) {
+    if (i < amazon.length && output.filter((x) => x.source === "amazon").length < 24) output.push(amazon[i]);
+    if (i < internal.length && output.filter((x) => x.source === "mongo").length < 12) output.push(internal[i]);
+    if (i < ebay.length && output.filter((x) => x.source === "ebay").length < 8) output.push(ebay[i]);
+  }
+  return output;
+}
+
 export async function searchShopX(query: string): Promise<SearchResult[]> {
   const cleanQuery = query.trim();
-
   if (!cleanQuery) return [];
-
-  const [internalResults, ebayResults] = await Promise.all([
+  const [amazonResults, internalResults, ebayResults] = await Promise.all([
+    searchAmazonProducts(cleanQuery),
     searchInternalProducts(cleanQuery),
     searchEbayProducts(cleanQuery),
   ]);
-
-  return [...internalResults, ...ebayResults];
+  return takeMixed(amazonResults, internalResults, ebayResults);
 }
