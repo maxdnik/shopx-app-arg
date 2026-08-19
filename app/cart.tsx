@@ -67,6 +67,17 @@ function normalizeText(value?: string | number | null) {
     .toLowerCase();
 }
 
+function getMissingFieldLabel(field: string) {
+  if (field === "dni") return "CUIT";
+  if (field === "phone") return "teléfono";
+  if (field === "streetName") return "calle";
+  if (field === "streetNumber") return "número";
+  if (field === "city") return "ciudad";
+  if (field === "province") return "provincia";
+  if (field === "postalCode") return "código postal";
+  return field;
+}
+
 function formatARS(value?: number) {
   const amount = Number(value || 0);
 
@@ -519,17 +530,21 @@ export default function CartScreen() {
       setCheckoutLoading(true);
 
       const account = await getAppAccount();
+      const accountMissingFields = account.checkoutProfile.missingFields || [];
+      const requiresCuit = accountMissingFields.includes("dni");
 
       setUser(account.user);
       setProfileComplete(account.checkoutProfile.complete);
-      setMissingFields(account.checkoutProfile.missingFields || []);
+      setMissingFields(accountMissingFields);
 
       if (!account.checkoutProfile.complete) {
         setCheckoutLoading(false);
 
         Alert.alert(
-          "Completá tus datos",
-          "Para comprar necesitamos tu teléfono, DNI/CUIT y dirección de entrega.",
+          requiresCuit ? "CUIT requerido" : "Completá tus datos",
+          requiresCuit
+            ? "Para continuar necesitamos tu CUIT de 11 dígitos. El DNI no es suficiente."
+            : "Para comprar necesitamos tu teléfono y dirección de entrega.",
           [
             { text: "Cancelar", style: "cancel" },
             { text: "Completar perfil", onPress: () => router.push("/profile") },
@@ -917,13 +932,13 @@ export default function CartScreen() {
                   </Text>
 
                   <Text style={styles.missingProfileText}>
-                    Necesitamos teléfono, DNI/CUIT y dirección de entrega para
-                    crear la orden.
+                    Necesitamos teléfono, CUIT de 11 dígitos y dirección de entrega.
+                    El DNI no es suficiente para el despacho.
                   </Text>
 
                   {missingFields.length > 0 ? (
                     <Text style={styles.missingProfileFields}>
-                      Faltan: {missingFields.join(", ")}
+                      Faltan: {missingFields.map(getMissingFieldLabel).join(", ")}
                     </Text>
                   ) : null}
 
