@@ -108,7 +108,8 @@ function toNumber(value: any, fallback = 0) {
     if (!raw) return fallback;
 
     let clean = raw.replace(/[^0-9.,-]/g, "");
-    if (!clean || clean === "-" || clean === "." || clean === ",") return fallback;
+    if (!clean || clean === "-" || clean === "." || clean === ",")
+      return fallback;
 
     const lastComma = clean.lastIndexOf(",");
     const lastDot = clean.lastIndexOf(".");
@@ -158,7 +159,8 @@ function titleCaseLabel(value: any) {
   const original = cleanString(value);
   const normalized = normalizeForCompare(original);
 
-  if (!normalized || normalized === "title" || normalized === "default title") return "Opción";
+  if (!normalized || normalized === "title" || normalized === "default title")
+    return "Opción";
 
   if (
     normalized.includes("capacity") ||
@@ -171,7 +173,8 @@ function titleCaseLabel(value: any) {
     return "Capacidad";
   }
 
-  if (normalized.includes("color") || normalized.includes("colour")) return "Color";
+  if (normalized.includes("color") || normalized.includes("colour"))
+    return "Color";
 
   if (
     normalized.includes("size") ||
@@ -184,12 +187,16 @@ function titleCaseLabel(value: any) {
     return "Talle";
   }
 
-  if (normalized.includes("memory") || normalized.includes("memoria")) return "Memoria";
+  if (normalized.includes("memory") || normalized.includes("memoria"))
+    return "Memoria";
   if (normalized.includes("ram")) return "RAM";
-  if (normalized.includes("dimension") || normalized.includes("dimensiones")) return "Dimensiones";
-  if (normalized.includes("width") || normalized.includes("ancho")) return "Ancho";
+  if (normalized.includes("dimension") || normalized.includes("dimensiones"))
+    return "Dimensiones";
+  if (normalized.includes("width") || normalized.includes("ancho"))
+    return "Ancho";
   if (normalized.includes("material")) return "Material";
-  if (normalized.includes("model") || normalized.includes("modelo")) return "Modelo";
+  if (normalized.includes("model") || normalized.includes("modelo"))
+    return "Modelo";
 
   const clean = original
     .replace(/[_-]+/g, " ")
@@ -246,7 +253,9 @@ function parseListLikeValue(value: any): any[] {
 }
 
 function cleanOptionValue(value: any) {
-  const clean = cleanString(value?.value ?? value?.name ?? value?.title ?? value)
+  const clean = cleanString(
+    value?.value ?? value?.name ?? value?.title ?? value,
+  )
     .replace(/^['"\[]+|['"\]]+$/g, "")
     .replace(/\\"/g, '"')
     .replace(/\s+/g, " ")
@@ -288,7 +297,8 @@ function isSelectableSpecKey(key: any) {
 function selectionGroupPriority(name: string) {
   const normalized = normalizeForCompare(name);
 
-  if (normalized.includes("capacidad") || normalized.includes("storage")) return 1;
+  if (normalized.includes("capacidad") || normalized.includes("storage"))
+    return 1;
   if (normalized.includes("memoria") || normalized === "ram") return 2;
   if (normalized.includes("color")) return 3;
   if (normalized.includes("talle") || normalized.includes("size")) return 4;
@@ -299,9 +309,16 @@ function selectionGroupPriority(name: string) {
 
 function sortOptionValuesByGroup(name: string, values: string[]) {
   const normalized = normalizeForCompare(name);
-  const unique = Array.from(new Set(values.map(cleanOptionValue).filter(Boolean)));
+  const unique = Array.from(
+    new Set(values.map(cleanOptionValue).filter(Boolean)),
+  );
 
-  if (normalized.includes("capacidad") || normalized.includes("storage") || normalized.includes("memoria") || normalized === "ram") {
+  if (
+    normalized.includes("capacidad") ||
+    normalized.includes("storage") ||
+    normalized.includes("memoria") ||
+    normalized === "ram"
+  ) {
     return unique.sort((a, b) => {
       const toGb = (value: string) => {
         const numberValue = toNumber(value, 0);
@@ -320,7 +337,18 @@ function sortOptionValuesByGroup(name: string, values: string[]) {
 
   if (normalized.includes("talle") || normalized.includes("size")) {
     return unique.sort((a, b) => {
-      const order = ["xxs", "xs", "s", "m", "l", "xl", "xxl", "2xl", "3xl", "4xl"];
+      const order = [
+        "xxs",
+        "xs",
+        "s",
+        "m",
+        "l",
+        "xl",
+        "xxl",
+        "2xl",
+        "3xl",
+        "4xl",
+      ];
       const aKey = normalizeForCompare(a).replace(/\s+/g, "");
       const bKey = normalizeForCompare(b).replace(/\s+/g, "");
       const aIndex = order.indexOf(aKey);
@@ -330,7 +358,8 @@ function sortOptionValuesByGroup(name: string, values: string[]) {
 
       const aNumber = toNumber(a, NaN);
       const bNumber = toNumber(b, NaN);
-      if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return aNumber - bNumber;
+      if (Number.isFinite(aNumber) && Number.isFinite(bNumber))
+        return aNumber - bNumber;
 
       return a.localeCompare(b);
     });
@@ -354,7 +383,9 @@ function isPriceSensitiveOptionGroup(name: string) {
 }
 
 function productHasPricedVariantSource(product: ShopXProduct) {
-  return collectProductVariants(product).some((variant: any) => getVariantPriceUSD(variant) > 0);
+  return collectProductVariants(product).some(
+    (variant: any) => getVariantPriceUSD(variant) > 0,
+  );
 }
 
 function collectProductVariants(product: ShopXProduct): any[] {
@@ -362,17 +393,31 @@ function collectProductVariants(product: ShopXProduct): any[] {
   const sourceRaw = rawProduct?.sourceRaw || {};
 
   return [
-    ...(Array.isArray(rawProduct?.shopifyVariants) ? rawProduct.shopifyVariants : []),
+    ...(Array.isArray(rawProduct?.shopifyVariants)
+      ? rawProduct.shopifyVariants
+      : []),
     ...(Array.isArray(rawProduct?.variations) ? rawProduct.variations : []),
-    ...(Array.isArray(rawProduct?.variationMatrix) ? rawProduct.variationMatrix : []),
-    ...(Array.isArray(sourceRaw?.shopifyVariants) ? sourceRaw.shopifyVariants : []),
+    ...(Array.isArray(rawProduct?.variationMatrix)
+      ? rawProduct.variationMatrix
+      : []),
+    ...(Array.isArray(sourceRaw?.shopifyVariants)
+      ? sourceRaw.shopifyVariants
+      : []),
     ...(Array.isArray(sourceRaw?.variants) ? sourceRaw.variants : []),
-    ...(Array.isArray(sourceRaw?.product?.variants) ? sourceRaw.product.variants : []),
-    ...(Array.isArray(sourceRaw?.data?.variants) ? sourceRaw.data.variants : []),
+    ...(Array.isArray(sourceRaw?.product?.variants)
+      ? sourceRaw.product.variants
+      : []),
+    ...(Array.isArray(sourceRaw?.data?.variants)
+      ? sourceRaw.data.variants
+      : []),
   ].filter(Boolean);
 }
 
-function addOptionValue(target: Map<string, Set<string>>, rawName: any, rawValue: any) {
+function addOptionValue(
+  target: Map<string, Set<string>>,
+  rawName: any,
+  rawValue: any,
+) {
   const name = titleCaseLabel(rawName);
   if (!name || name === "Opción") return;
 
@@ -394,14 +439,20 @@ function extractOptionValues(option: any): string[] {
     option?.items ??
     [];
 
-  return Array.from(new Set(parseListLikeValue(rawValues).map(cleanOptionValue).filter(Boolean)));
+  return Array.from(
+    new Set(
+      parseListLikeValue(rawValues).map(cleanOptionValue).filter(Boolean),
+    ),
+  );
 }
 
 function getProductOptionNames(product: ShopXProduct): string[] {
   const rawOptions = Array.isArray(product.options) ? product.options : [];
 
   const names = rawOptions
-    .map((option, index) => titleCaseLabel(option?.name || `Opción ${index + 1}`))
+    .map((option, index) =>
+      titleCaseLabel(option?.name || `Opción ${index + 1}`),
+    )
     .filter((name) => name && name !== "Opción");
 
   if (names.length) return names;
@@ -411,11 +462,16 @@ function getProductOptionNames(product: ShopXProduct): string[] {
 
   if (Array.isArray(firstVariant?.selectedOptions)) {
     return firstVariant.selectedOptions
-      .map((item: any) => titleCaseLabel(item?.name || item?.label || item?.key))
+      .map((item: any) =>
+        titleCaseLabel(item?.name || item?.label || item?.key),
+      )
       .filter((name: string) => name && name !== "Opción");
   }
 
-  if (firstVariant?.selectedOptions && typeof firstVariant.selectedOptions === "object") {
+  if (
+    firstVariant?.selectedOptions &&
+    typeof firstVariant.selectedOptions === "object"
+  ) {
     return Object.keys(firstVariant.selectedOptions)
       .map(titleCaseLabel)
       .filter((name) => name && name !== "Opción");
@@ -426,7 +482,7 @@ function getProductOptionNames(product: ShopXProduct): string[] {
 
 function extractVariantSelectedOptions(
   variant: any,
-  product: ShopXProduct
+  product: ShopXProduct,
 ): SelectedProductOptions {
   const selected: SelectedProductOptions = {};
   const optionNames = getProductOptionNames(product);
@@ -439,12 +495,21 @@ function extractVariantSelectedOptions(
 
   if (Array.isArray(variant?.selectedOptions)) {
     variant.selectedOptions.forEach((item: any) => {
-      addSelected(item?.name || item?.label || item?.key, item?.value || item?.nameValue || item?.title);
+      addSelected(
+        item?.name || item?.label || item?.key,
+        item?.value || item?.nameValue || item?.title,
+      );
     });
   }
 
-  if (variant?.selectedOptions && typeof variant.selectedOptions === "object" && !Array.isArray(variant.selectedOptions)) {
-    Object.entries(variant.selectedOptions).forEach(([name, value]) => addSelected(name, value));
+  if (
+    variant?.selectedOptions &&
+    typeof variant.selectedOptions === "object" &&
+    !Array.isArray(variant.selectedOptions)
+  ) {
+    Object.entries(variant.selectedOptions).forEach(([name, value]) =>
+      addSelected(name, value),
+    );
   }
 
   if (Array.isArray(variant?.options)) {
@@ -454,16 +519,35 @@ function extractVariantSelectedOptions(
         return;
       }
 
-      addSelected(item?.name || item?.label || item?.key || optionNames[index] || `Opción ${index + 1}`, item?.value || item?.title || item?.nameValue);
+      addSelected(
+        item?.name ||
+          item?.label ||
+          item?.key ||
+          optionNames[index] ||
+          `Opción ${index + 1}`,
+        item?.value || item?.title || item?.nameValue,
+      );
     });
   }
 
-  if (variant?.options && typeof variant.options === "object" && !Array.isArray(variant.options)) {
-    Object.entries(variant.options).forEach(([name, value]) => addSelected(name, value));
+  if (
+    variant?.options &&
+    typeof variant.options === "object" &&
+    !Array.isArray(variant.options)
+  ) {
+    Object.entries(variant.options).forEach(([name, value]) =>
+      addSelected(name, value),
+    );
   }
 
-  if (variant?.selections && typeof variant.selections === "object" && !Array.isArray(variant.selections)) {
-    Object.entries(variant.selections).forEach(([name, value]) => addSelected(name, value));
+  if (
+    variant?.selections &&
+    typeof variant.selections === "object" &&
+    !Array.isArray(variant.selections)
+  ) {
+    Object.entries(variant.selections).forEach(([name, value]) =>
+      addSelected(name, value),
+    );
   }
 
   ["option1", "option2", "option3"].forEach((key, index) => {
@@ -475,17 +559,32 @@ function extractVariantSelectedOptions(
 
   if (Array.isArray(variant?.attributes)) {
     variant.attributes.forEach((item: any) => {
-      addSelected(item?.name || item?.label || item?.key, item?.value || item?.title);
+      addSelected(
+        item?.name || item?.label || item?.key,
+        item?.value || item?.title,
+      );
     });
   }
 
-  if ((variant?.attribute || variant?.name || variant?.label || variant?.key) && (variant?.value || variant?.title || variant?.optionValue)) {
-    addSelected(variant?.attribute || variant?.name || variant?.label || variant?.key, variant?.value || variant?.title || variant?.optionValue);
+  if (
+    (variant?.attribute || variant?.name || variant?.label || variant?.key) &&
+    (variant?.value || variant?.title || variant?.optionValue)
+  ) {
+    addSelected(
+      variant?.attribute || variant?.name || variant?.label || variant?.key,
+      variant?.value || variant?.title || variant?.optionValue,
+    );
   }
 
   [
     ["Color", variant?.color || variant?.colour || variant?.colorName],
-    ["Capacidad", variant?.capacity || variant?.storage || variant?.ssd || variant?.storageSize],
+    [
+      "Capacidad",
+      variant?.capacity ||
+        variant?.storage ||
+        variant?.ssd ||
+        variant?.storageSize,
+    ],
     ["Memoria", variant?.memory || variant?.ram],
     ["Talle", variant?.size || variant?.shoeSize || variant?.usSize],
   ].forEach(([name, value]) => addSelected(name, value));
@@ -501,11 +600,14 @@ function getVariantId(variant: any) {
       variant?.admin_graphql_api_id ||
       variant?.sku ||
       variant?.title ||
-      ""
+      "",
   );
 }
 
-function getVariantTitle(variant: any, selectedOptions?: SelectedProductOptions) {
+function getVariantTitle(
+  variant: any,
+  selectedOptions?: SelectedProductOptions,
+) {
   const title = cleanString(variant?.title || variant?.name);
   if (title && normalizeForCompare(title) !== "default title") return title;
 
@@ -529,7 +631,7 @@ function getVariantPriceUSD(variant: any) {
       variant?.node?.price?.amount ??
       variant?.node?.priceUSD ??
       variant?.price,
-    0
+    0,
   );
 }
 
@@ -564,13 +666,13 @@ function getVariantImageUrl(variant: any) {
       variant?.featuredImage ||
       variant?.featured_image ||
       variant?.media?.[0] ||
-      variant?.imageDetails?.images?.[0]
+      variant?.imageDetails?.images?.[0],
   );
 }
 
 function normalizeBreakdownRow(row: any): PricingBreakdownRow | null {
   const label = String(
-    row?.label ?? row?.name ?? row?.concept ?? row?.title ?? ""
+    row?.label ?? row?.name ?? row?.concept ?? row?.title ?? "",
   ).trim();
 
   const amount = toNumber(
@@ -581,7 +683,7 @@ function normalizeBreakdownRow(row: any): PricingBreakdownRow | null {
       row?.priceUSD ??
       row?.totalUSD ??
       row?.total,
-    0
+    0,
   );
 
   if (!label || !Number.isFinite(amount) || amount < 0) {
@@ -614,7 +716,7 @@ function getRawFinalPriceUSD(product: ShopXProduct) {
   const breakdown = normalizeBreakdown(product);
   const breakdownTotal = breakdown.reduce(
     (total, row) => total + toNumber(row.amount, 0),
-    0
+    0,
   );
 
   return (
@@ -663,13 +765,13 @@ function getProductResolveKey(product: ShopXProduct): string {
       product.externalId ||
       product.sourceUrl ||
       product.title ||
-      ""
+      "",
   ).trim();
 }
 
 function mergeResolvedProduct(
   base: ShopXProduct,
-  resolved?: ShopXProduct | null
+  resolved?: ShopXProduct | null,
 ): ShopXProduct {
   if (!resolved) return base;
 
@@ -683,30 +785,43 @@ function mergeResolvedProduct(
     imageUrls: resolved.imageUrls?.length ? resolved.imageUrls : base.imageUrls,
     image: resolved.image || base.image,
     imageUrl: resolved.imageUrl || base.imageUrl,
-    media: Array.isArray(resolvedAny.media) && resolvedAny.media.length ? resolvedAny.media : baseAny.media,
+    media:
+      Array.isArray(resolvedAny.media) && resolvedAny.media.length
+        ? resolvedAny.media
+        : baseAny.media,
     sourceRaw: resolvedAny.sourceRaw || baseAny.sourceRaw,
-    specs: resolvedAny.specs && Object.keys(resolvedAny.specs || {}).length ? resolvedAny.specs : baseAny.specs,
-    options: resolvedAny.options?.length ? resolvedAny.options : baseAny.options,
-    variations: resolvedAny.variations?.length ? resolvedAny.variations : baseAny.variations,
-    variationMatrix: resolvedAny.variationMatrix?.length ? resolvedAny.variationMatrix : baseAny.variationMatrix,
+    specs:
+      resolvedAny.specs && Object.keys(resolvedAny.specs || {}).length
+        ? resolvedAny.specs
+        : baseAny.specs,
+    options: resolvedAny.options?.length
+      ? resolvedAny.options
+      : baseAny.options,
+    variations: resolvedAny.variations?.length
+      ? resolvedAny.variations
+      : baseAny.variations,
+    variationMatrix: resolvedAny.variationMatrix?.length
+      ? resolvedAny.variationMatrix
+      : baseAny.variationMatrix,
     shopifyVariants: resolvedAny.shopifyVariants?.length
       ? resolvedAny.shopifyVariants
       : baseAny.shopifyVariants,
     selectedOptions: resolvedAny.selectedOptions || baseAny.selectedOptions,
     selectedVariant: resolvedAny.selectedVariant || baseAny.selectedVariant,
-    selectedVariantId: resolvedAny.selectedVariantId || baseAny.selectedVariantId,
+    selectedVariantId:
+      resolvedAny.selectedVariantId || baseAny.selectedVariantId,
     pricing: resolved.pricing || base.pricing,
   };
 }
 
 async function hydrateProductsWithResolvedPricing(
   products: ShopXProduct[],
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct[]> {
   const normalizedBase = normalizeProductsFromApi(products);
 
   const keys = Array.from(
-    new Set(normalizedBase.map(getProductResolveKey).filter(Boolean))
+    new Set(normalizedBase.map(getProductResolveKey).filter(Boolean)),
   );
 
   if (!keys.length) {
@@ -769,7 +884,7 @@ async function hydrateProductsWithResolvedPricing(
 
 export async function getProducts(
   limit = 100,
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct[]> {
   const response = await fetch(buildApiUrl(`/api/products?limit=${limit}`));
 
@@ -788,7 +903,7 @@ export async function getProducts(
 
 export async function searchProducts(
   query: string,
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct[]> {
   const cleanQuery = query.trim();
 
@@ -797,7 +912,7 @@ export async function searchProducts(
   }
 
   const response = await fetch(
-    buildApiUrl(`/api/app-search?query=${encodeURIComponent(cleanQuery)}`)
+    buildApiUrl(`/api/app-search?query=${encodeURIComponent(cleanQuery)}`),
   );
 
   if (!response.ok) {
@@ -815,7 +930,7 @@ export async function searchProducts(
 
 export async function getProductBySlug(
   slug: string,
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct | null> {
   const cleanSlug = String(slug || "").trim();
 
@@ -824,7 +939,7 @@ export async function getProductBySlug(
   }
 
   const response = await fetch(
-    buildApiUrl(`/api/app/products/${encodeURIComponent(cleanSlug)}`)
+    buildApiUrl(`/api/app/products/${encodeURIComponent(cleanSlug)}`),
   );
 
   if (response.status === 404) {
@@ -847,7 +962,7 @@ export async function getProductBySlug(
     try {
       const resolved = await resolveProductsBySlugs(
         [normalized.slug || normalized._id || cleanSlug],
-        destination
+        destination,
       );
 
       return mergeResolvedProduct(normalized, resolved[0]);
@@ -862,7 +977,7 @@ export async function getProductBySlug(
 export async function getProductsByStore(
   storeSlug: string,
   limit = 24,
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct[]> {
   const cleanSlug = String(storeSlug || "").trim();
 
@@ -872,8 +987,8 @@ export async function getProductsByStore(
 
   const response = await fetch(
     buildApiUrl(
-      `/api/app/stores/${encodeURIComponent(cleanSlug)}/products?limit=${limit}`
-    )
+      `/api/app/stores/${encodeURIComponent(cleanSlug)}/products?limit=${limit}`,
+    ),
   );
 
   if (!response.ok) {
@@ -891,14 +1006,10 @@ export async function getProductsByStore(
 
 export async function resolveProductsBySlugs(
   slugs: string[],
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct[]> {
   const cleanSlugs = Array.from(
-    new Set(
-      slugs
-        .map((slug) => String(slug || "").trim())
-        .filter(Boolean)
-    )
+    new Set(slugs.map((slug) => String(slug || "").trim()).filter(Boolean)),
   );
 
   if (!cleanSlugs.length) {
@@ -931,7 +1042,7 @@ export async function resolveProductsBySlugs(
 
 export async function resolveProductsForCartItems(
   items: ProductSelectionResolveItem[],
-  destination?: DomesticPricingDestination
+  destination?: DomesticPricingDestination,
 ): Promise<ShopXProduct[]> {
   const cleanItems = items
     .map((item) => ({
@@ -978,7 +1089,8 @@ export function formatUSD(value?: number) {
   if (!Number.isFinite(amount)) return "Consultar";
 
   return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 
@@ -1006,7 +1118,9 @@ function collectRawImages(value: any): any[] {
   return [value];
 }
 
-export function getSelectableOptionGroups(product: ShopXProduct): ProductOptionGroup[] {
+export function getSelectableOptionGroups(
+  product: ShopXProduct,
+): ProductOptionGroup[] {
   const rawProduct = product as any;
   const groups = new Map<string, Set<string>>();
   const hasPricedVariants = productHasPricedVariantSource(product);
@@ -1021,13 +1135,16 @@ export function getSelectableOptionGroups(product: ShopXProduct): ProductOptionG
 
   collectProductVariants(product).forEach((variant: any) => {
     const selected = extractVariantSelectedOptions(variant, product);
-    Object.entries(selected).forEach(([name, value]) => addOptionValue(groups, name, value));
+    Object.entries(selected).forEach(([name, value]) =>
+      addOptionValue(groups, name, value),
+    );
   });
 
   const specs = rawProduct?.specs;
-  const specEntries = specs && typeof specs === "object" && !Array.isArray(specs)
-    ? Object.entries(specs)
-    : [];
+  const specEntries =
+    specs && typeof specs === "object" && !Array.isArray(specs)
+      ? Object.entries(specs)
+      : [];
 
   specEntries.forEach(([key, value]) => {
     if (!isSelectableSpecKey(key)) return;
@@ -1037,7 +1154,9 @@ export function getSelectableOptionGroups(product: ShopXProduct): ProductOptionG
     // porque si no el usuario elige 1 TB y el precio queda igual.
     if (isPriceSensitiveOptionGroup(String(key)) && !hasPricedVariants) return;
 
-    const values = parseListLikeValue(value).map(cleanOptionValue).filter(Boolean);
+    const values = parseListLikeValue(value)
+      .map(cleanOptionValue)
+      .filter(Boolean);
     if (values.length > 1) {
       values.forEach((item) => addOptionValue(groups, key, item));
     }
@@ -1049,19 +1168,25 @@ export function getSelectableOptionGroups(product: ShopXProduct): ProductOptionG
       values: sortOptionValuesByGroup(name, Array.from(values)),
     }))
     .filter((group) => group.values.length > 1)
-    .filter((group) => !isPriceSensitiveOptionGroup(group.name) || hasPricedVariants)
-    .sort((a, b) => selectionGroupPriority(a.name) - selectionGroupPriority(b.name))
+    .filter(
+      (group) => !isPriceSensitiveOptionGroup(group.name) || hasPricedVariants,
+    )
+    .sort(
+      (a, b) => selectionGroupPriority(a.name) - selectionGroupPriority(b.name),
+    )
     .slice(0, 8);
 }
 
-export function buildInitialSelectedOptions(product: ShopXProduct): SelectedProductOptions {
+export function buildInitialSelectedOptions(
+  product: ShopXProduct,
+): SelectedProductOptions {
   const existing = product.selectedOptions || {};
   const groups = getSelectableOptionGroups(product);
   const selected: SelectedProductOptions = {};
 
   groups.forEach((group) => {
     const existingValue = Object.entries(existing).find(
-      ([name]) => normalizeForCompare(name) === normalizeForCompare(group.name)
+      ([name]) => normalizeForCompare(name) === normalizeForCompare(group.name),
     )?.[1];
 
     selected[group.name] = cleanString(existingValue) || group.values[0];
@@ -1072,15 +1197,18 @@ export function buildInitialSelectedOptions(product: ShopXProduct): SelectedProd
 
 function optionSelectionsMatch(
   variantOptions: SelectedProductOptions,
-  selectedOptions: SelectedProductOptions
+  selectedOptions: SelectedProductOptions,
 ) {
-  const selectedEntries = Object.entries(selectedOptions).filter(([, value]) => cleanString(value));
+  const selectedEntries = Object.entries(selectedOptions).filter(([, value]) =>
+    cleanString(value),
+  );
 
   if (!selectedEntries.length) return false;
 
   return selectedEntries.every(([name, value]) => {
     const match = Object.entries(variantOptions).find(
-      ([variantName]) => normalizeForCompare(variantName) === normalizeForCompare(name)
+      ([variantName]) =>
+        normalizeForCompare(variantName) === normalizeForCompare(name),
     );
 
     if (!match) return false;
@@ -1089,11 +1217,24 @@ function optionSelectionsMatch(
   });
 }
 
-function getFlatVariationOption(variation: any): { name: string; value: string } | null {
-  const name = normalizeOptionName(variation?.attribute || variation?.name || variation?.label || variation?.key);
-  const value = cleanString(variation?.value || variation?.title || variation?.option || variation?.optionValue);
+function getFlatVariationOption(
+  variation: any,
+): { name: string; value: string } | null {
+  const name = normalizeOptionName(
+    variation?.attribute ||
+      variation?.name ||
+      variation?.label ||
+      variation?.key,
+  );
+  const value = cleanString(
+    variation?.value ||
+      variation?.title ||
+      variation?.option ||
+      variation?.optionValue,
+  );
 
-  if (!name || !value || normalizeForCompare(value) === "default title") return null;
+  if (!name || !value || normalizeForCompare(value) === "default title")
+    return null;
 
   return { name, value };
 }
@@ -1105,7 +1246,7 @@ function getFlatVariationPrice(variation: any) {
       variation?.surchargeUSD ??
       variation?.extraUSD ??
       variation?.deltaUSD,
-    0
+    0,
   );
 }
 
@@ -1116,17 +1257,19 @@ function getBaseSourcePriceUSD(product: ShopXProduct) {
       rawProduct.sourcePriceUSD ??
       rawProduct.price ??
       rawProduct.basePriceUSD,
-    0
+    0,
   );
 }
 
 function findStructuredProductVariant(
   product: ShopXProduct,
-  selectedOptions?: SelectedProductOptions
+  selectedOptions?: SelectedProductOptions,
 ): any | null {
   const rawProduct = product as any;
   const selected = selectedOptions || product.selectedOptions || {};
-  const selectedVariantId = cleanString(product.selectedVariantId || rawProduct?.selectedVariant?.id);
+  const selectedVariantId = cleanString(
+    product.selectedVariantId || rawProduct?.selectedVariant?.id,
+  );
   const variants = collectProductVariants(product).filter((variant: any) => {
     return (
       variant?.selectedOptions ||
@@ -1148,16 +1291,23 @@ function findStructuredProductVariant(
   if (!variants.length) return null;
 
   if (selectedVariantId) {
-    const byId = variants.find((variant: any) => getVariantId(variant) === selectedVariantId);
+    const byId = variants.find(
+      (variant: any) => getVariantId(variant) === selectedVariantId,
+    );
     if (byId) return byId;
   }
 
   // Regla senior/ecommerce: NO adivinamos variantes por match parcial.
   // Si el usuario eligió Capacidad + Color, necesitamos una variante que coincida con ambas.
   // El bug del precio USD 12.495 venía de elegir una variante carísima por coincidencia parcial.
-  return variants.find((variant: any) =>
-    optionSelectionsMatch(extractVariantSelectedOptions(variant, product), selected)
-  ) || null;
+  return (
+    variants.find((variant: any) =>
+      optionSelectionsMatch(
+        extractVariantSelectedOptions(variant, product),
+        selected,
+      ),
+    ) || null
+  );
 }
 
 function isProbablyAbsoluteVariantPrice(price: number, basePrice: number) {
@@ -1175,30 +1325,43 @@ function getExplicitAbsoluteFlatPrice(variation: any) {
       variation?.sourcePriceUSD ??
       variation?.priceAmount ??
       variation?.amountUSD,
-    0
+    0,
   );
 }
 
 function getExplicitSurchargeFlatPrice(variation: any) {
   return toNumber(
     variation?.surchargeUSD ?? variation?.extraUSD ?? variation?.deltaUSD,
-    0
+    0,
   );
 }
 
 function calculateFlatVariationSelectionPrice(
   product: ShopXProduct,
-  selectedOptions?: SelectedProductOptions
-): { priceUSD: number; matched: any[]; selectedOptions: SelectedProductOptions } | null {
+  selectedOptions?: SelectedProductOptions,
+): {
+  priceUSD: number;
+  matched: any[];
+  selectedOptions: SelectedProductOptions;
+} | null {
   const rawProduct = product as any;
-  const selectedEntries = Object.entries(selectedOptions || product.selectedOptions || {})
-    .map(([name, value]) => [normalizeOptionName(name), cleanString(value)] as [string, string])
+  const selectedEntries = Object.entries(
+    selectedOptions || product.selectedOptions || {},
+  )
+    .map(
+      ([name, value]) =>
+        [normalizeOptionName(name), cleanString(value)] as [string, string],
+    )
     .filter(([, value]) => Boolean(value));
 
-  if (!selectedEntries.length || !Array.isArray(rawProduct?.variations)) return null;
+  if (!selectedEntries.length || !Array.isArray(rawProduct?.variations))
+    return null;
 
   const flatVariations = rawProduct.variations
-    .map((variation: any) => ({ raw: variation, option: getFlatVariationOption(variation) }))
+    .map((variation: any) => ({
+      raw: variation,
+      option: getFlatVariationOption(variation),
+    }))
     .filter((item: any) => item.option);
 
   if (!flatVariations.length) return null;
@@ -1209,7 +1372,8 @@ function calculateFlatVariationSelectionPrice(
     const match = flatVariations.find((item: any) => {
       const option = item.option as { name: string; value: string };
       return (
-        normalizeForCompare(option.name) === normalizeForCompare(selectedName) &&
+        normalizeForCompare(option.name) ===
+          normalizeForCompare(selectedName) &&
         normalizeForCompare(option.value) === normalizeForCompare(selectedValue)
       );
     });
@@ -1229,8 +1393,10 @@ function calculateFlatVariationSelectionPrice(
         const option = item.option as { name: string; value: string };
         return (
           item.raw?.sku &&
-          normalizeForCompare(option.name) === normalizeForCompare(selectedName) &&
-          normalizeForCompare(option.value) === normalizeForCompare(selectedValue)
+          normalizeForCompare(option.name) ===
+            normalizeForCompare(selectedName) &&
+          normalizeForCompare(option.value) ===
+            normalizeForCompare(selectedValue)
         );
       })
       .map((item: any) => cleanString(item.raw.sku))
@@ -1241,22 +1407,29 @@ function calculateFlatVariationSelectionPrice(
 
   if (skuSets.length > 1 && skuSets.every((set) => set.size > 0)) {
     const [firstSet, ...restSets] = skuSets;
-    const sharedSku = Array.from(firstSet).find((sku) => restSets.every((set) => set.has(sku)));
+    const sharedSku = Array.from(firstSet).find((sku) =>
+      restSets.every((set) => set.has(sku)),
+    );
 
     if (sharedSku) {
-      const skuRows = rawProduct.variations.filter((variation: any) => cleanString(variation?.sku) === sharedSku);
-      const rowWithPrice = skuRows.find((variation: any) =>
-        getExplicitAbsoluteFlatPrice(variation) > 0 || toNumber(variation?.price, 0) > 0
+      const skuRows = rawProduct.variations.filter(
+        (variation: any) => cleanString(variation?.sku) === sharedSku,
+      );
+      const rowWithPrice = skuRows.find(
+        (variation: any) =>
+          getExplicitAbsoluteFlatPrice(variation) > 0 ||
+          toNumber(variation?.price, 0) > 0,
       );
 
       if (rowWithPrice) {
         const explicitAbsolute = getExplicitAbsoluteFlatPrice(rowWithPrice);
         const rawPrice = toNumber(rowWithPrice?.price, 0);
-        const selectedPrice = explicitAbsolute > 0
-          ? explicitAbsolute
-          : isProbablyAbsoluteVariantPrice(rawPrice, basePrice)
-            ? rawPrice
-            : basePrice + rawPrice;
+        const selectedPrice =
+          explicitAbsolute > 0
+            ? explicitAbsolute
+            : isProbablyAbsoluteVariantPrice(rawPrice, basePrice)
+              ? rawPrice
+              : basePrice + rawPrice;
 
         return {
           priceUSD: selectedPrice,
@@ -1295,7 +1468,8 @@ function calculateFlatVariationSelectionPrice(
   }
 
   return {
-    priceUSD: bestAbsolute > 0 ? bestAbsolute + surcharge : basePrice + surcharge,
+    priceUSD:
+      bestAbsolute > 0 ? bestAbsolute + surcharge : basePrice + surcharge,
     matched,
     selectedOptions: Object.fromEntries(selectedEntries),
   };
@@ -1303,7 +1477,7 @@ function calculateFlatVariationSelectionPrice(
 
 export function findMatchingProductVariant(
   product: ShopXProduct,
-  selectedOptions?: SelectedProductOptions
+  selectedOptions?: SelectedProductOptions,
 ): any | null {
   return findStructuredProductVariant(product, selectedOptions);
 }
@@ -1316,22 +1490,32 @@ export function getSelectedOptionsSummary(product: ShopXProduct): string[] {
 
 export function applySelectedProductOptions(
   product: ShopXProduct,
-  selectedOptions?: SelectedProductOptions
+  selectedOptions?: SelectedProductOptions,
 ): ShopXProduct {
   const cleanSelected = selectedOptions || product.selectedOptions || {};
-  const structuredVariant = findStructuredProductVariant(product, cleanSelected);
-  const flatSelection = structuredVariant ? null : calculateFlatVariationSelectionPrice(product, cleanSelected);
+  const structuredVariant = findStructuredProductVariant(
+    product,
+    cleanSelected,
+  );
+  const flatSelection = structuredVariant
+    ? null
+    : calculateFlatVariationSelectionPrice(product, cleanSelected);
 
-  const structuredVariantPrice = structuredVariant ? getVariantPriceUSD(structuredVariant) : 0;
-  const variantImage = structuredVariant ? getVariantImageUrl(structuredVariant) : null;
+  const structuredVariantPrice = structuredVariant
+    ? getVariantPriceUSD(structuredVariant)
+    : 0;
+  const variantImage = structuredVariant
+    ? getVariantImageUrl(structuredVariant)
+    : null;
   const variantSelected = structuredVariant
     ? extractVariantSelectedOptions(structuredVariant, product)
     : flatSelection?.selectedOptions || cleanSelected;
 
   const flatPrimary = flatSelection?.matched?.[0];
-  const selectedSourcePrice = structuredVariantPrice > 0
-    ? structuredVariantPrice
-    : flatSelection?.priceUSD || getBaseSourcePriceUSD(product);
+  const selectedSourcePrice =
+    structuredVariantPrice > 0
+      ? structuredVariantPrice
+      : flatSelection?.priceUSD || getBaseSourcePriceUSD(product);
 
   const selectedVariant: SelectedProductVariant | undefined = structuredVariant
     ? {
@@ -1345,17 +1529,26 @@ export function applySelectedProductOptions(
       }
     : flatSelection
       ? {
-          id: cleanString(flatPrimary?.sku || flatPrimary?._id || Object.values(variantSelected).join("-")),
+          id: cleanString(
+            flatPrimary?.sku ||
+              flatPrimary?._id ||
+              Object.values(variantSelected).join("-"),
+          ),
           sku: cleanString(flatPrimary?.sku),
           title: Object.values(variantSelected).filter(Boolean).join(" / "),
           priceUSD: selectedSourcePrice || undefined,
-          imageUrl: extractImageUrl(flatPrimary?.image || flatPrimary?.imageUrl) || undefined,
-          available: flatPrimary?.stock === undefined || Number(flatPrimary?.stock) > 0,
+          imageUrl:
+            extractImageUrl(flatPrimary?.image || flatPrimary?.imageUrl) ||
+            undefined,
+          available:
+            flatPrimary?.stock === undefined || Number(flatPrimary?.stock) > 0,
           selectedOptions: variantSelected,
         }
       : undefined;
 
-  const selectedImage = variantImage || extractImageUrl(flatPrimary?.image || flatPrimary?.imageUrl);
+  const selectedImage =
+    variantImage ||
+    extractImageUrl(flatPrimary?.image || flatPrimary?.imageUrl);
   const mergedImages = selectedImage
     ? [selectedImage, ...(product.imageUrls || []), ...(product.images || [])]
     : product.imageUrls || product.images;

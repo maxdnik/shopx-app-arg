@@ -1,3 +1,5 @@
+import { ImageViewer } from "../../components/ImageViewer";
+import { PriceSummary } from "../../components/PriceSummary";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { addProductToCart } from "../../lib/cart-store";
@@ -52,7 +54,12 @@ function getProductSlug(product: ShopXProduct) {
 }
 
 function getBrand(product: ShopXProduct) {
-  return (product.brand || product.store || product.source || "SHOPX").toUpperCase();
+  return (
+    product.brand ||
+    product.store ||
+    product.source ||
+    "SHOPX"
+  ).toUpperCase();
 }
 
 function getCategoryLabel(product: ShopXProduct) {
@@ -71,7 +78,8 @@ function getSourceLabel(product: ShopXProduct) {
 
   if (source.includes("amazon")) return "AMAZON USA";
   if (source.includes("ebay")) return "EBAY USA";
-  if (source.includes("manual") || source.includes("shopx")) return "SHOPX CURATED";
+  if (source.includes("manual") || source.includes("shopx"))
+    return "SHOPX CURATED";
 
   return getBrand(product);
 }
@@ -96,106 +104,30 @@ type SpecificationRow = {
   value: string;
 };
 
-const REQUIRED_BREAKDOWN_ROWS = [
-  "Precio Productos USA",
-  "IVA importación (21%)",
-  "Flete Internacional",
-  "Aduana y Tasas",
-  "Gestión y Seguro ShopX",
-  "Logística Nacional",
-];
-
-function normalizeText(value?: string | number | null) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function normalizeBreakdownLabel(label: string) {
-  const clean = normalizeText(label);
-
-  if (clean.includes("producto")) return "Precio Productos USA";
-  if (clean.includes("iva")) return "IVA importación (21%)";
-  if (clean.includes("flete") || clean.includes("internacional")) {
-    return "Flete Internacional";
-  }
-  if (clean.includes("aduana") || clean.includes("tasas")) {
-    return "Aduana y Tasas";
-  }
-  if (
-    clean.includes("gestión") ||
-    clean.includes("gestion") ||
-    clean.includes("seguro") ||
-    clean.includes("shopx")
-  ) {
-    return "Gestión y Seguro ShopX";
-  }
-  if (clean.includes("nacional") || clean.includes("local")) {
-    return "Logística Nacional";
-  }
-
-  return String(label || "Concepto");
-}
-
-function getBreakdownAmount(row: any) {
-  const value =
-    row?.amount ??
-    row?.amountUSD ??
-    row?.value ??
-    row?.usd ??
-    row?.priceUSD ??
-    row?.totalUSD ??
-    row?.total ??
-    0;
-
-  const numberValue = Number(value);
-
-  return Number.isFinite(numberValue) ? numberValue : 0;
-}
-
 function getPricingBreakdown(product: ShopXProduct): CleanBreakdownRow[] {
-  const rows = Array.isArray(product.pricing?.breakdown)
+  return Array.isArray(product.pricing?.breakdown)
     ? product.pricing.breakdown
     : [];
-
-  const totals: Record<string, number> = REQUIRED_BREAKDOWN_ROWS.reduce(
-    (acc, label) => {
-      acc[label] = 0;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
-
-  rows.forEach((row: any) => {
-    const label = normalizeBreakdownLabel(String(row?.label || ""));
-    const amount = getBreakdownAmount(row);
-
-    if (label && Number.isFinite(amount)) {
-      totals[label] = (totals[label] || 0) + amount;
-    }
-  });
-
-  return REQUIRED_BREAKDOWN_ROWS.map((label) => ({
-    label,
-    amount: Number((totals[label] || 0).toFixed(2)),
-  }));
 }
 
 function productHasPricingBreakdown(product: ShopXProduct) {
-  return Array.isArray(product.pricing?.breakdown) && product.pricing.breakdown.length > 0;
+  return (
+    Array.isArray(product.pricing?.breakdown) &&
+    product.pricing.breakdown.length > 0
+  );
 }
 
 function buildDomesticPricingDestination(
-  user?: ShopXUser | null
+  user?: ShopXUser | null,
 ): DomesticPricingDestination | undefined {
   if (!user) return undefined;
 
   const province = String(
-    user.address?.province || user.billing?.province || ""
+    user.address?.province || user.billing?.province || "",
   ).trim();
   const city = String(user.address?.city || user.billing?.city || "").trim();
   const postalCode = String(
-    user.address?.postalCode || user.billing?.postalCode || ""
+    user.address?.postalCode || user.billing?.postalCode || "",
   ).trim();
 
   if (!province && !city && !postalCode) return undefined;
@@ -224,7 +156,7 @@ function humanizeSpecLabel(label: string) {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
-function specValueToText(value: any) {
+function specValueToText(value: any): string {
   if (value === null || value === undefined) return "";
 
   if (Array.isArray(value)) {
@@ -246,7 +178,10 @@ function specValueToText(value: any) {
 
   const raw = String(value).trim();
 
-  if ((raw.startsWith("[") && raw.endsWith("]")) || (raw.startsWith("{") && raw.endsWith("}"))) {
+  if (
+    (raw.startsWith("[") && raw.endsWith("]")) ||
+    (raw.startsWith("{") && raw.endsWith("}"))
+  ) {
     try {
       const parsed = JSON.parse(raw);
       return specValueToText(parsed);
@@ -357,18 +292,27 @@ function shouldHideSpecification(label: string, value: any) {
     "memoria",
   ];
 
-  if (optionKeys.some((optionKey) => key === optionKey || key.includes(optionKey))) {
+  if (
+    optionKeys.some((optionKey) => key === optionKey || key.includes(optionKey))
+  ) {
     return true;
   }
 
-  if (textValue.includes("http://") || textValue.includes("https://") || textValue.includes("www.")) {
+  if (
+    textValue.includes("http://") ||
+    textValue.includes("https://") ||
+    textValue.includes("www.")
+  ) {
     return true;
   }
 
   if (listLike.length > 1) return true;
 
   // Evita objetos/arrays serializados tipo ["US 6", "US 7"] dentro de especificaciones.
-  if ((textValue.startsWith("[") && textValue.endsWith("]")) || (textValue.startsWith("{") && textValue.endsWith("}"))) {
+  if (
+    (textValue.startsWith("[") && textValue.endsWith("]")) ||
+    (textValue.startsWith("{") && textValue.endsWith("}"))
+  ) {
     return true;
   }
 
@@ -381,7 +325,7 @@ function pushSpecRow(
   rows: SpecificationRow[],
   label: string,
   value: any,
-  seen: Set<string>
+  seen: Set<string>,
 ) {
   if (shouldHideSpecification(label, value)) return;
 
@@ -418,11 +362,14 @@ function getProductSpecifications(product: ShopXProduct): SpecificationRow[] {
         rows,
         item.label || item.name || item.key || item.title || "Detalle",
         item.value || item.text || item.description,
-        seen
+        seen,
       );
     });
   } else if (specs && typeof specs === "object") {
-    const entries = specs instanceof Map ? Array.from(specs.entries()) : Object.entries(specs);
+    const entries =
+      specs instanceof Map
+        ? Array.from(specs.entries())
+        : Object.entries(specs);
 
     entries.forEach(([key, value]) => {
       pushSpecRow(rows, key, value, seen);
@@ -432,11 +379,16 @@ function getProductSpecifications(product: ShopXProduct): SpecificationRow[] {
   // Fallback: ficha técnica útil desde campos top-level si no vino en specs.
   const dimensions = rawProduct?.dimensionsCm;
   if (dimensions?.length || dimensions?.width || dimensions?.height) {
-    const dimensionText = [dimensions.length, dimensions.width, dimensions.height]
+    const dimensionText = [
+      dimensions.length,
+      dimensions.width,
+      dimensions.height,
+    ]
       .filter(Boolean)
       .join(" × ");
 
-    if (dimensionText) pushSpecRow(rows, "Dimensiones", `${dimensionText} cm`, seen);
+    if (dimensionText)
+      pushSpecRow(rows, "Dimensiones", `${dimensionText} cm`, seen);
   }
 
   return rows.slice(0, 12);
@@ -482,7 +434,9 @@ function BreakdownRow({
       >
         {label}
       </Text>
-      <Text style={[styles.breakdownValue, strong && styles.breakdownValueStrong]}>
+      <Text
+        style={[styles.breakdownValue, strong && styles.breakdownValueStrong]}
+      >
         {value}
       </Text>
     </View>
@@ -506,13 +460,17 @@ function ProductOptionSelector({
 
       <View style={styles.optionValuesWrap}>
         {values.map((value) => {
-          const isSelected = String(selectedValue || "") === String(value || "");
+          const isSelected =
+            String(selectedValue || "") === String(value || "");
 
           return (
             <TouchableOpacity
               key={`${name}-${value}`}
               activeOpacity={0.84}
-              style={[styles.optionChip, isSelected && styles.optionChipSelected]}
+              style={[
+                styles.optionChip,
+                isSelected && styles.optionChipSelected,
+              ]}
               onPress={() => onSelect(value)}
             >
               <Text
@@ -539,14 +497,17 @@ export default function ProductDetailScreen() {
 
   const [product, setProduct] = useState<ShopXProduct | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<ShopXProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [addingToCart, setAddingToCart] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const [selectedOptions, setSelectedOptions] = useState<SelectedProductOptions>({});
-  const [resolvedSelectionProduct, setResolvedSelectionProduct] = useState<ShopXProduct | null>(null);
+  const [selectedOptions, setSelectedOptions] =
+    useState<SelectedProductOptions>({});
+  const [resolvedSelectionProduct, setResolvedSelectionProduct] =
+    useState<ShopXProduct | null>(null);
   const [variantPricingLoading, setVariantPricingLoading] = useState(false);
 
   async function loadProduct(options?: { silent?: boolean }) {
@@ -593,7 +554,8 @@ export default function ProductDetailScreen() {
           })
           .filter(
             (item) =>
-              getCategoryLabel(item) === currentCategory || getBrand(item) === currentBrand
+              getCategoryLabel(item) === currentCategory ||
+              getBrand(item) === currentBrand,
           )
           .slice(0, 6);
 
@@ -625,12 +587,13 @@ export default function ProductDetailScreen() {
 
   const optionGroups = useMemo(
     () => (product ? getSelectableOptionGroups(product) : []),
-    [product]
+    [product],
   );
 
   const locallySelectedProduct = useMemo(
-    () => (product ? applySelectedProductOptions(product, selectedOptions) : null),
-    [product, selectedOptionsSignature]
+    () =>
+      product ? applySelectedProductOptions(product, selectedOptions) : null,
+    [product, selectedOptionsSignature],
   );
 
   useEffect(() => {
@@ -643,7 +606,11 @@ export default function ProductDetailScreen() {
     let cancelled = false;
 
     async function resolveSelectedVariantPricing() {
-      const localProduct = applySelectedProductOptions(product, selectedOptions);
+      if (!product) return;
+      const localProduct = applySelectedProductOptions(
+        product,
+        selectedOptions,
+      );
       const key = getProductSlug(product);
 
       if (!key) return;
@@ -661,7 +628,7 @@ export default function ProductDetailScreen() {
               quantity: 1,
             },
           ],
-          destination
+          destination,
         );
 
         if (cancelled) return;
@@ -671,11 +638,18 @@ export default function ProductDetailScreen() {
               {
                 ...localProduct,
                 ...resolved[0],
-                selectedOptions: resolved[0].selectedOptions || localProduct.selectedOptions,
-                selectedVariant: (resolved[0] as any).selectedVariant || localProduct.selectedVariant,
-                selectedVariantId: resolved[0].selectedVariantId || localProduct.selectedVariantId,
+                selectedOptions:
+                  resolved[0].selectedOptions || localProduct.selectedOptions,
+                selectedVariant:
+                  (resolved[0] as any).selectedVariant ||
+                  localProduct.selectedVariant,
+                selectedVariantId:
+                  resolved[0].selectedVariantId ||
+                  localProduct.selectedVariantId,
               },
-              resolved[0].selectedOptions || localProduct.selectedOptions || selectedOptions
+              resolved[0].selectedOptions ||
+                localProduct.selectedOptions ||
+                selectedOptions,
             )
           : localProduct;
 
@@ -693,21 +667,32 @@ export default function ProductDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [product?._id, product?.slug, selectedOptionsSignature, optionGroups.length]);
+  }, [
+    product?._id,
+    product?.slug,
+    selectedOptionsSignature,
+    optionGroups.length,
+  ]);
 
-  const effectiveProduct = resolvedSelectionProduct || locallySelectedProduct || product;
+  const effectiveProduct =
+    resolvedSelectionProduct || locallySelectedProduct || product;
 
-  const { isFavorite, updatingFavorite, toggleFavorite } = useFavoriteProduct(product);
+  const { isFavorite, updatingFavorite, toggleFavorite } =
+    useFavoriteProduct(product);
 
-  const finalPrice = effectiveProduct ? getDisplayFinalPriceUSD(effectiveProduct) : 0;
+  const finalPrice = effectiveProduct
+    ? getDisplayFinalPriceUSD(effectiveProduct)
+    : 0;
   const pricingBreakdown = useMemo(
     () => (effectiveProduct ? getPricingBreakdown(effectiveProduct) : []),
-    [effectiveProduct]
+    [effectiveProduct],
   );
-  const hasPricingBreakdown = effectiveProduct ? productHasPricingBreakdown(effectiveProduct) : false;
+  const hasPricingBreakdown = effectiveProduct
+    ? productHasPricingBreakdown(effectiveProduct)
+    : false;
   const specifications = useMemo(
     () => (effectiveProduct ? getProductSpecifications(effectiveProduct) : []),
-    [effectiveProduct]
+    [effectiveProduct],
   );
 
   async function handleToggleFavorite() {
@@ -719,7 +704,7 @@ export default function ProductDetailScreen() {
       console.log("ERROR TOGGLE FAVORITE DETAIL:", error);
       Alert.alert(
         "No pudimos actualizar favoritos",
-        "Hubo un problema al guardar este producto. Probá de nuevo."
+        "Hubo un problema al guardar este producto. Probá de nuevo.",
       );
     }
   }
@@ -739,13 +724,19 @@ export default function ProductDetailScreen() {
     setAddingToCart(true);
 
     try {
-      const productToAdd = effectiveProduct || applySelectedProductOptions(product, selectedOptions);
+      const productToAdd =
+        effectiveProduct ||
+        applySelectedProductOptions(product, selectedOptions);
       await addProductToCart(productToAdd);
 
-      Alert.alert("Producto agregado", "El producto fue agregado al carrito de ShopX.", [
-        { text: "Seguir viendo", style: "cancel" },
-        { text: "Ir al carrito", onPress: () => router.push("/cart") },
-      ]);
+      Alert.alert(
+        "Producto agregado",
+        "El producto fue agregado al carrito de ShopX.",
+        [
+          { text: "Seguir viendo", style: "cancel" },
+          { text: "Ir al carrito", onPress: () => router.push("/cart") },
+        ],
+      );
     } catch (error) {
       console.log("ERROR ADD TO CART:", error);
       Alert.alert("No pudimos agregarlo", "Probá nuevamente en unos segundos.");
@@ -753,7 +744,6 @@ export default function ProductDetailScreen() {
       setAddingToCart(false);
     }
   }
-
 
   if (loading) {
     return (
@@ -776,10 +766,14 @@ export default function ProductDetailScreen() {
 
           <Text style={styles.errorTitle}>No encontramos el producto</Text>
           <Text style={styles.errorText}>
-            Puede que el producto ya no esté disponible o que haya cambiado el link.
+            Puede que el producto ya no esté disponible o que haya cambiado el
+            link.
           </Text>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={() => router.back()}>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => router.back()}
+          >
             <Text style={styles.primaryButtonText}>Volver</Text>
           </TouchableOpacity>
         </View>
@@ -791,7 +785,8 @@ export default function ProductDetailScreen() {
   const productImages = getProductImages(displayProduct);
   const imageUrl = getProductImage(displayProduct);
   const description = getShortDescription(displayProduct);
-  const canToggleDescription = description.length > DESCRIPTION_PREVIEW_CHAR_LIMIT;
+  const canToggleDescription =
+    description.length > DESCRIPTION_PREVIEW_CHAR_LIMIT;
 
   return (
     <View style={styles.app}>
@@ -812,17 +807,25 @@ export default function ProductDetailScreen() {
       >
         <View style={styles.headerBand}>
           <View style={styles.topBar}>
-            <TouchableOpacity style={styles.topIconButton} onPress={() => router.back()}>
+            <TouchableOpacity
+              style={styles.topIconButton}
+              onPress={() => router.back()}
+            >
               <Feather name="chevron-left" size={25} color={white} />
             </TouchableOpacity>
 
             <View style={styles.topTitleWrap}>
               <Text style={styles.topTitle}>Detalle del producto</Text>
-              <Text style={styles.topSubtitle}>Compra en USA. Recibí en Argentina.</Text>
+              <Text style={styles.topSubtitle}>
+                Compra en USA. Recibí en Argentina.
+              </Text>
             </View>
 
             <TouchableOpacity
-              style={[styles.topIconButton, isFavorite && styles.favoriteButtonActive]}
+              style={[
+                styles.topIconButton,
+                isFavorite && styles.favoriteButtonActive,
+              ]}
               activeOpacity={0.88}
               disabled={updatingFavorite}
               onPress={handleToggleFavorite}
@@ -834,7 +837,9 @@ export default function ProductDetailScreen() {
 
         <View style={styles.imageCard}>
           <View style={styles.sourcePill}>
-            <Text style={styles.sourcePillText}>{getSourceLabel(displayProduct)}</Text>
+            <Text style={styles.sourcePillText}>
+              {getSourceLabel(displayProduct)}
+            </Text>
           </View>
 
           {productImages.length > 0 ? (
@@ -846,7 +851,7 @@ export default function ProductDetailScreen() {
                 decelerationRate="fast"
                 onMomentumScrollEnd={(event) => {
                   const nextIndex = Math.round(
-                    event.nativeEvent.contentOffset.x / imageCardWidth
+                    event.nativeEvent.contentOffset.x / imageCardWidth,
                   );
                   setActiveImageIndex(nextIndex);
                 }}
@@ -856,7 +861,13 @@ export default function ProductDetailScreen() {
                     key={`${uri}-${index}`}
                     style={[styles.imageSlide, { width: imageCardWidth }]}
                   >
-                    <Image source={{ uri }} style={styles.productImage} />
+                    <TouchableOpacity
+                      accessibilityLabel="Ampliar foto del producto"
+                      onPress={() => setViewerIndex(index)}
+                      style={{ flex: 1, width: "100%" }}
+                    >
+                      <Image source={{ uri }} style={styles.productImage} />
+                    </TouchableOpacity>
                   </View>
                 ))}
               </ScrollView>
@@ -896,12 +907,16 @@ export default function ProductDetailScreen() {
           </View>
 
           <Text style={styles.productTitle}>{displayProduct.title}</Text>
-          <Text style={styles.category}>{getCategoryLabel(displayProduct)}</Text>
+          <Text style={styles.category}>
+            {getCategoryLabel(displayProduct)}
+          </Text>
 
           <View style={styles.descriptionBox}>
             <Text
               style={styles.description}
-              numberOfLines={descriptionExpanded ? undefined : DESCRIPTION_PREVIEW_LINES}
+              numberOfLines={
+                descriptionExpanded ? undefined : DESCRIPTION_PREVIEW_LINES
+              }
             >
               {description}
             </Text>
@@ -937,7 +952,8 @@ export default function ProductDetailScreen() {
             </Text>
 
             <Text style={styles.priceNote}>
-              Incluye producto, impuestos, aduana, gestión ShopX y logística estimada.
+              Incluye producto, impuestos, aduana, gestión ShopX y logística
+              estimada.
             </Text>
           </View>
         </View>
@@ -946,7 +962,11 @@ export default function ProductDetailScreen() {
           <View style={styles.optionsCard}>
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderIcon}>
-                <MaterialCommunityIcons name="tune-variant" size={22} color={navy} />
+                <MaterialCommunityIcons
+                  name="tune-variant"
+                  size={22}
+                  color={navy}
+                />
               </View>
 
               <View style={{ flex: 1 }}>
@@ -970,7 +990,9 @@ export default function ProductDetailScreen() {
             {variantPricingLoading ? (
               <View style={styles.variantLoadingRow}>
                 <ActivityIndicator size="small" color={navy} />
-                <Text style={styles.variantLoadingText}>Actualizando precio final...</Text>
+                <Text style={styles.variantLoadingText}>
+                  Actualizando precio final...
+                </Text>
               </View>
             ) : null}
           </View>
@@ -980,12 +1002,18 @@ export default function ProductDetailScreen() {
           <View style={styles.specsCard}>
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderIcon}>
-                <MaterialCommunityIcons name="format-list-bulleted" size={22} color={navy} />
+                <MaterialCommunityIcons
+                  name="format-list-bulleted"
+                  size={22}
+                  color={navy}
+                />
               </View>
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>Especificaciones</Text>
-                <Text style={styles.cardSubtitle}>Características principales del producto.</Text>
+                <Text style={styles.cardSubtitle}>
+                  Características principales del producto.
+                </Text>
               </View>
             </View>
 
@@ -1027,7 +1055,11 @@ export default function ProductDetailScreen() {
           <View style={styles.breakdownCard}>
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderIcon}>
-                <MaterialCommunityIcons name="receipt-text-outline" size={22} color={navy} />
+                <MaterialCommunityIcons
+                  name="receipt-text-outline"
+                  size={22}
+                  color={navy}
+                />
               </View>
 
               <View style={{ flex: 1 }}>
@@ -1038,13 +1070,7 @@ export default function ProductDetailScreen() {
               </View>
             </View>
 
-            {pricingBreakdown.map((row, index) => (
-              <BreakdownRow
-                key={`${row.label}-${index}`}
-                label={row.label}
-                value={`USD ${formatUSD(row.amount)}`}
-              />
-            ))}
+            <PriceSummary rows={pricingBreakdown} />
 
             <BreakdownRow
               label="Total final Argentina"
@@ -1056,14 +1082,18 @@ export default function ProductDetailScreen() {
 
         <View style={styles.deliveryCard}>
           <View style={styles.deliveryIcon}>
-            <MaterialCommunityIcons name="airplane-takeoff" size={27} color={navy} />
+            <MaterialCommunityIcons
+              name="airplane-takeoff"
+              size={27}
+              color={navy}
+            />
           </View>
 
           <View style={{ flex: 1 }}>
             <Text style={styles.deliveryTitle}>Entrega estimada</Text>
             <Text style={styles.deliveryText}>
-              Recibís tu compra en Argentina en aproximadamente 5 a 10 días hábiles
-              una vez comprado en origen.
+              Entrega estimada de 10 a 14 días. Los productos personalizados
+              pueden sumar el plazo de fabricación informado por la tienda.
             </Text>
           </View>
         </View>
@@ -1087,7 +1117,6 @@ export default function ProductDetailScreen() {
               </>
             )}
           </TouchableOpacity>
-
         </View>
 
         {relatedProducts.length > 0 ? (
@@ -1095,7 +1124,9 @@ export default function ProductDetailScreen() {
             <View style={styles.relatedHeader}>
               <View>
                 <Text style={styles.relatedEyebrow}>SHOPX CURATED</Text>
-                <Text style={styles.relatedTitle}>También puede interesarte</Text>
+                <Text style={styles.relatedTitle}>
+                  También puede interesarte
+                </Text>
               </View>
               <TouchableOpacity onPress={() => router.push("/categories")}>
                 <Text style={styles.relatedLink}>Ver más</Text>
@@ -1117,11 +1148,16 @@ export default function ProductDetailScreen() {
                     key={key || item.title}
                     style={styles.relatedCard}
                     activeOpacity={0.88}
-                    onPress={() => key && router.push(`/product/${encodeURIComponent(key)}`)}
+                    onPress={() =>
+                      key && router.push(`/product/${encodeURIComponent(key)}`)
+                    }
                   >
                     <View style={styles.relatedImageBox}>
                       {relatedImage ? (
-                        <Image source={{ uri: relatedImage }} style={styles.relatedImage} />
+                        <Image
+                          source={{ uri: relatedImage }}
+                          style={styles.relatedImage}
+                        />
                       ) : (
                         <MaterialCommunityIcons
                           name="package-variant-closed"
@@ -1137,7 +1173,9 @@ export default function ProductDetailScreen() {
                     </Text>
 
                     <Text style={styles.relatedPrice}>
-                      {relatedPrice ? `USD ${formatUSD(relatedPrice)}` : "Consultar"}
+                      {relatedPrice
+                        ? `USD ${formatUSD(relatedPrice)}`
+                        : "Consultar"}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1149,6 +1187,12 @@ export default function ProductDetailScreen() {
         <View style={{ height: 130 }} />
       </ScrollView>
 
+      <ImageViewer
+        images={productImages}
+        index={viewerIndex}
+        onIndexChange={setViewerIndex}
+        onClose={() => setViewerIndex(null)}
+      />
       <AppBottomNav />
     </View>
   );

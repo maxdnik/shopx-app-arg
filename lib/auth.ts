@@ -32,6 +32,7 @@ export type ShopXArca = {
 };
 
 export type ShopXUser = {
+  taxCondition?: string;
   id: string;
   fullName?: string;
   name?: string;
@@ -105,7 +106,9 @@ export type UpdateAccountPayload = {
 };
 
 function cleanEmail(email: string) {
-  return String(email || "").trim().toLowerCase();
+  return String(email || "")
+    .trim()
+    .toLowerCase();
 }
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
@@ -174,7 +177,7 @@ export async function loginApp(payload: LoginPayload): Promise<ShopXUser> {
 }
 
 export async function loginWithGoogleApp(
-  payload: GoogleLoginPayload
+  payload: GoogleLoginPayload,
 ): Promise<ShopXUser> {
   const idToken = String(payload.idToken || "").trim();
 
@@ -204,7 +207,7 @@ export async function loginWithGoogleApp(
 }
 
 export async function loginWithAppleApp(
-  payload: AppleLoginPayload
+  payload: AppleLoginPayload,
 ): Promise<ShopXUser> {
   const identityToken = String(payload.identityToken || "").trim();
 
@@ -237,7 +240,7 @@ export async function loginWithAppleApp(
 }
 
 export async function registerApp(
-  payload: RegisterPayload
+  payload: RegisterPayload,
 ): Promise<ShopXUser> {
   const response = await fetch(buildApiUrl("/api/app/auth/register"), {
     method: "POST",
@@ -332,9 +335,7 @@ export async function getAppAccount(): Promise<{
   };
 }
 
-export async function updateAppAccount(
-  payload: UpdateAccountPayload
-): Promise<{
+export async function updateAppAccount(payload: UpdateAccountPayload): Promise<{
   user: ShopXUser;
   checkoutProfile: CheckoutProfile;
 }> {

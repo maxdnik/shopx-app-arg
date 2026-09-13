@@ -30,7 +30,10 @@ function getSelectionKey(product: ShopXProduct) {
   const selectedOptions = rawProduct?.selectedOptions || {};
 
   const optionKey = Object.entries(selectedOptions)
-    .map(([name, value]) => [String(name || "").trim(), String(value || "").trim()])
+    .map(([name, value]) => [
+      String(name || "").trim(),
+      String(value || "").trim(),
+    ])
     .filter(([name, value]) => name && value)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, value]) => `${name}:${value}`)
@@ -40,7 +43,7 @@ function getSelectionKey(product: ShopXProduct) {
     rawProduct?.selectedVariantId ||
       rawProduct?.selectedVariant?.id ||
       rawProduct?.selectedVariant?.sku ||
-      ""
+      "",
   ).trim();
 
   return optionKey || variantKey;
@@ -89,59 +92,59 @@ export async function getCartCount() {
   }
 }
 
-export async function addProductToCart(product: ShopXProduct) {
-  try {
-    const currentCart = await getCartItems();
-    const productKey = getProductKey(product);
-
-    const existingIndex = currentCart.findIndex(
-      (item) => getProductKey(item.product) === productKey
-    );
-
-    let nextCart: CartItem[];
-
-    if (existingIndex >= 0) {
-      nextCart = currentCart.map((item, index) =>
-        index === existingIndex
-          ? {
-              ...item,
-              quantity: Number(item.quantity || 0) + 1,
-            }
-          : item
+// Serialize read/modify/write operations so fast taps cannot drop cart lines.
+let cartMutation: Promise<unknown> = Promise.resolve();
+function mutateCart<T>(operation: () => Promise<T>): Promise<T> {
+  const next = cartMutation.then(operation, operation);
+  cartMutation = next.catch(() => undefined);
+  return next;
+}
+export function addProductToCart(product: ShopXProduct) {
+  return addProductsToCart([{ product, quantity: 1 }]);
+}
+export function addProductsToCart(
+  incoming: { product: ShopXProduct; quantity: number }[],
+) {
+  return mutateCart(async () => {
+    const next = await getCartItems();
+    for (const { product, quantity } of incoming) {
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 3)
+        throw new Error(
+          "Podés comprar hasta tres unidades del mismo producto.",
+        );
+      const index = next.findIndex(
+        (item) => getProductKey(item.product) === getProductKey(product),
       );
-    } else {
-      nextCart = [
-        ...currentCart,
-        {
-          product,
-          quantity: 1,
-          addedAt: new Date().toISOString(),
-        },
-      ];
+      if (index >= 0) {
+        const total = next[index].quantity + quantity;
+        if (total > 3)
+          throw new Error(
+            "El carrito admite hasta tres unidades del mismo producto. Revisá las cantidades.",
+          );
+        next[index] = { ...next[index], product, quantity: total };
+      } else
+        next.push({ product, quantity, addedAt: new Date().toISOString() });
     }
-
-    await AsyncStorage.setItem(CART_KEY, JSON.stringify(nextCart));
+    if (next.length > 10)
+      throw new Error("El carrito admite hasta diez productos por operación.");
+    await AsyncStorage.setItem(CART_KEY, JSON.stringify(next));
     notifyCartChanged();
-
-    return nextCart;
-  } catch (error) {
-    console.log("ERROR ADD CART:", error);
-    throw error;
-  }
+    return next;
+  });
 }
 
 export async function updateCartItemQuantity(
   product: ShopXProduct,
-  quantity: number
+  quantity: number,
 ) {
-  try {
+  return mutateCart(async () => {
     const currentCart = await getCartItems();
     const productKey = getProductKey(product);
 
     const nextCart =
       quantity <= 0
         ? currentCart.filter(
-            (item) => getProductKey(item.product) !== productKey
+            (item) => getProductKey(item.product) !== productKey,
           )
         : currentCart.map((item) =>
             getProductKey(item.product) === productKey
@@ -149,39 +152,37 @@ export async function updateCartItemQuantity(
                   ...item,
                   quantity,
                 }
-              : item
+              : item,
           );
 
+    if (!Number.isInteger(quantity) || quantity > 3)
+      throw new Error("Podés comprar hasta tres unidades del mismo producto.");
     await AsyncStorage.setItem(CART_KEY, JSON.stringify(nextCart));
     notifyCartChanged();
 
     return nextCart;
-  } catch (error) {
-    console.log("ERROR UPDATE CART:", error);
-    return [];
-  }
+  });
 }
 
 export async function removeProductFromCart(product: ShopXProduct) {
-  try {
+  return mutateCart(async () => {
     const currentCart = await getCartItems();
     const productKey = getProductKey(product);
 
     const nextCart = currentCart.filter(
-      (item) => getProductKey(item.product) !== productKey
+      (item) => getProductKey(item.product) !== productKey,
     );
 
     await AsyncStorage.setItem(CART_KEY, JSON.stringify(nextCart));
     notifyCartChanged();
 
     return nextCart;
-  } catch (error) {
-    console.log("ERROR REMOVE CART:", error);
-    return [];
-  }
+  });
 }
 
 export async function clearCart() {
-  await AsyncStorage.removeItem(CART_KEY);
-  notifyCartChanged();
+  return mutateCart(async () => {
+    await AsyncStorage.removeItem(CART_KEY);
+    notifyCartChanged();
+  });
 }

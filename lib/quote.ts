@@ -35,9 +35,16 @@ function isLikelyUrl(value: string) {
   if (!clean) return false;
 
   try {
-    const withProtocol = /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
+    const withProtocol = /^https?:\/\//i.test(clean)
+      ? clean
+      : `https://${clean}`;
     const url = new URL(withProtocol);
-    return Boolean(url.hostname && url.hostname.includes("."));
+    return Boolean(
+      ["https:", "http:"].includes(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        url.hostname.includes("."),
+    );
   } catch {
     return false;
   }
@@ -62,7 +69,7 @@ export function validateQuoteUrl(value: string) {
 }
 
 export async function submitQuoteRequest(
-  payload: QuoteRequestPayload
+  payload: QuoteRequestPayload,
 ): Promise<QuoteRequestResponse> {
   const token = await getAuthToken();
   const storedUser = await getStoredUser();
@@ -74,10 +81,14 @@ export async function submitQuoteRequest(
     throw new Error(urlError);
   }
 
-  const contact = cleanString(payload.contact || storedUser?.email || storedUser?.phone || "");
+  const contact = cleanString(
+    payload.contact || storedUser?.email || storedUser?.phone || "",
+  );
 
   if (!contact) {
-    throw new Error("Dejanos un email o teléfono para responderte la cotización.");
+    throw new Error(
+      "Dejanos un email o teléfono para responderte la cotización.",
+    );
   }
 
   const response = await fetch(buildApiUrl("/api/app/quote"), {
@@ -108,7 +119,9 @@ export async function submitQuoteRequest(
   }
 
   if (!response.ok || data.ok === false) {
-    throw new Error(data.message || data.error || "No pudimos enviar la cotización.");
+    throw new Error(
+      data.message || data.error || "No pudimos enviar la cotización.",
+    );
   }
 
   return data;

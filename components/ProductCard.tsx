@@ -12,6 +12,7 @@ import {
   getDisplayFinalPriceUSD,
   getProductImage,
   ShopXProduct,
+  getSelectableOptionGroups,
 } from "../lib/api";
 import { addProductToCart } from "../lib/cart-store";
 import { useFavoriteProduct } from "../hooks/useFavorites";
@@ -35,7 +36,12 @@ type ProductCardProps = {
 };
 
 function getBrand(product: ShopXProduct) {
-  return (product.brand || product.store || product.source || "SHOPX").toUpperCase();
+  return (
+    product.brand ||
+    product.store ||
+    product.source ||
+    "SHOPX"
+  ).toUpperCase();
 }
 
 function getCategoryLabel(product: ShopXProduct) {
@@ -77,18 +83,24 @@ export function ProductCard({
 
   async function handleAddToCart() {
     try {
+      if (getSelectableOptionGroups(product).length > 0 || !product._id) {
+        onPress();
+        return;
+      }
       await addProductToCart(product);
 
       Alert.alert(
         "Agregado al carrito",
-        `${product.title || "Producto"} fue agregado correctamente.`
+        `${product.title || "Producto"} fue agregado correctamente.`,
       );
     } catch (error) {
       console.log("ERROR ADD PRODUCT FROM CARD:", error);
 
       Alert.alert(
         "No pudimos agregarlo",
-        "Hubo un problema al agregar el producto al carrito. Probá de nuevo."
+        error instanceof Error
+          ? error.message
+          : "Hubo un problema al agregar el producto al carrito. Probá de nuevo.",
       );
     }
   }
@@ -101,7 +113,7 @@ export function ProductCard({
 
       Alert.alert(
         "No pudimos guardar el favorito",
-        "Hubo un problema al actualizar tus favoritos. Probá de nuevo."
+        "Hubo un problema al actualizar tus favoritos. Probá de nuevo.",
       );
     }
   }
@@ -186,6 +198,9 @@ export function ProductCard({
         {price ? `USD ${formatUSD(price)}` : "Consultar"}
       </Text>
 
+      <Text style={{ color: muted, fontSize: 11, marginTop: 6 }}>
+        Entrega estimada: 10–14 días
+      </Text>
       {showFooter ? (
         <View style={styles.footer}>
           <Text style={styles.footerText}>Ver detalle</Text>
