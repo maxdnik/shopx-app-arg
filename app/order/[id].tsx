@@ -1,3 +1,4 @@
+import { OrderShipments } from "../../components/OrderShipments";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -1067,7 +1068,7 @@ export default function OrderDetailScreen() {
 
                     <View style={styles.itemMetaRow}>
                       <Text style={styles.itemMeta}>Cantidad: {quantity}</Text>
-                      <Text style={styles.itemMeta}>Precio final</Text>
+                      <Text style={styles.itemMeta}>Importe del producto</Text>
                     </View>
                   </View>
 
@@ -1195,6 +1196,7 @@ export default function OrderDetailScreen() {
         </View>
 
         <View style={{ height: 132 }} />
+        <OrderShipments order={order} />
       </ScrollView>
 
       <AppBottomNav />

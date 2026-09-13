@@ -85,8 +85,8 @@ export type CreateAppOrderPayload = {
   exchangeRateUsed?: number;
 };
 
-
 export type CreateMercadoPagoCheckoutPayload = {
+  expectedTotalARS?: number;
   /** Para pagar una orden existente desde pantalla de pedido. */
   orderId?: string;
   orderNumber?: string;
@@ -113,6 +113,16 @@ export type CreateMercadoPagoCheckoutPayload = {
 };
 
 export type AppOrder = {
+  partialShipments?: {
+    id: string;
+    code: string;
+    sequence: number;
+    status: string;
+    itemIndexes: number[];
+    localTrackingNumber?: string;
+    localCourierName?: string;
+    history?: { label?: string; status?: string; date?: string }[];
+  }[];
   _id: string;
   orderNumber: string;
   userId?: string;
@@ -211,10 +221,14 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 function cleanEmail(email?: string) {
-  return String(email || "").trim().toLowerCase();
+  return String(email || "")
+    .trim()
+    .toLowerCase();
 }
 
-function buildQuery(params: Record<string, string | number | undefined | null>) {
+function buildQuery(
+  params: Record<string, string | number | undefined | null>,
+) {
   const searchParams = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
@@ -227,7 +241,7 @@ function buildQuery(params: Record<string, string | number | undefined | null>) 
   return query ? `?${query}` : "";
 }
 
-async function getAuthHeaders() {
+async function getAuthHeaders(): Promise<Record<string, string>> {
   const token = await getAuthToken();
 
   if (!token) {
@@ -256,7 +270,7 @@ export async function getExchangeRate(): Promise<number> {
 }
 
 export async function createAppOrder(
-  payload: CreateAppOrderPayload
+  payload: CreateAppOrderPayload,
 ): Promise<CreateAppOrderResponse> {
   const authHeaders = await getAuthHeaders();
 
@@ -318,13 +332,15 @@ export async function getAppOrderById(params: {
   });
 
   const response = await fetch(
-    buildApiUrl(`/api/app/orders/${encodeURIComponent(params.orderId)}${query}`),
+    buildApiUrl(
+      `/api/app/orders/${encodeURIComponent(params.orderId)}${query}`,
+    ),
     {
       method: "GET",
       headers: {
         ...authHeaders,
       },
-    }
+    },
   );
 
   const data = await parseJsonResponse<AppOrderDetailResponse>(response);
@@ -333,7 +349,7 @@ export async function getAppOrderById(params: {
 }
 
 export async function createMercadoPagoCheckout(
-  params: CreateMercadoPagoCheckoutPayload
+  params: CreateMercadoPagoCheckoutPayload,
 ): Promise<MercadoPagoCheckoutResponse> {
   const authHeaders = await getAuthHeaders();
 

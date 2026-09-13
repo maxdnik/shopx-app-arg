@@ -1,10 +1,11 @@
-import { LinearGradient } from "expo-linear-gradient";
+import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Linking,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,1609 +13,459 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ProductCard } from "../../components/ProductCard";
 import { useCartCount } from "../../hooks/useCartCount";
-import { useFavorites } from "../../hooks/useFavorites";
-import { useUnreadNotificationsCount } from "../../hooks/useNotifications";
-import {
-  formatUSD,
-  getDisplayFinalPriceUSD,
-  getProductImage,
-  getProducts,
-  searchProducts,
-  ShopXProduct,
-} from "../../lib/api";
+import { getStoredUser } from "../../lib/auth";
+import { ShopXProduct } from "../../lib/api";
+import { getHomeContent, HomeContent } from "../../lib/catalog";
+import { buildApiUrl } from "../../lib/config";
 import { saveProductToCache } from "../../lib/product-cache";
-import { getAppAccount, getStoredUser, ShopXUser } from "../../lib/auth";
-import { getOfficialStores, ShopXStore } from "../../lib/stores";
-import {
-  canUseRemoteStoreLogo,
-  getStoreLogoSource,
-  getStoreLogoWordmark,
-} from "../../lib/store-logos";
 
-const navy = "#062B4F";
-const navyDark = "#031A33";
-const navyDeep = "#021326";
-const text = "#071E35";
-const muted = "#718096";
-const accent = "#18C7D8";
-const soft = "#F7FAFC";
-const border = "#E2E8F0";
-const white = "#FFFFFF";
-const yellow = "#F6C343";
-
-const categories = [
-  { icon: "view-grid-outline", label: "Todo", type: "material" },
-  { icon: "headphones", label: "Tecnología", type: "feather" },
-  { icon: "sofa-outline", label: "Hogar", type: "material" },
-  { icon: "tshirt-crew-outline", label: "Moda", type: "material" },
-  { icon: "watch-variant", label: "Relojes", type: "material" },
-  { icon: "shoe-sneaker", label: "Deportes", type: "material" },
+const labels: Record<string, string> = {
+  clothing: "Ropa",
+  technology: "Tecnología",
+  toys: "Juguetes",
+  outdoor: "Outdoor",
+};
+const guides = [
+  {
+    title: "LEGO: construí tu colección",
+    text: "Fórmula 1, fútbol y modelos para coleccionar.",
+    path: "/lego-formula-1-argentina",
+  },
+  {
+    title: "GAP: encontrá tu calce",
+    text: "Jeans, talles y cortes para elegir mejor.",
+    path: "/jeans-gap-90s",
+  },
+  {
+    title: "Tenis: elegí tu equipo",
+    text: "Raquetas y guías para tu próximo partido.",
+    path: "/raquetas-tenis-principiantes",
+  },
 ];
-
-function getProductSlug(product: ShopXProduct) {
-  return product.slug || product._id || product.id || product.externalId || "";
-}
-
 function openProduct(product: ShopXProduct) {
-  const slug = getProductSlug(product);
-  if (!slug) return;
-
   saveProductToCache(product);
-  router.push(`/product/${slug}`);
+  router.push({
+    pathname: "/product/[id]",
+    params: { id: product.slug || product._id || product.id || "" },
+  });
 }
-
-function getUserCity(user: ShopXUser | null) {
-  const city = user?.address?.city || user?.billing?.city || "";
-  return String(city || "").trim();
-}
-
-function getUserProvince(user: ShopXUser | null) {
-  const province = user?.address?.province || user?.billing?.province || "";
-  return String(province || "").trim();
-}
-
-function buildDeliveryLabel(user: ShopXUser | null) {
-  const city = getUserCity(user);
-  const province = getUserProvince(user);
-
-  if (!city) return "";
-
-  return [city, province].filter(Boolean).join(", ");
-}
-
-function CategoryIcon({
-  icon,
-  type,
-  active,
-}: {
-  icon: string;
-  type: string;
-  active: boolean;
-}) {
-  const color = active ? white : navy;
-
-  if (type === "feather") {
-    return <Feather name={icon as any} size={22} color={color} />;
-  }
-
-  return <MaterialCommunityIcons name={icon as any} size={25} color={color} />;
-}
-
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const cartCount = useCartCount();
-  const { favoritesCount } = useFavorites();
-  const { unreadCount } = useUnreadNotificationsCount({ seedDemo: false });
-
-  const [products, setProducts] = useState<ShopXProduct[]>([]);
-  const [stores, setStores] = useState<ShopXStore[]>([]);
-  const [searchResults, setSearchResults] = useState<ShopXProduct[]>([]);
-  const [homeSearch, setHomeSearch] = useState("");
-  const [deliveryLabel, setDeliveryLabel] = useState("");
+  const [content, setContent] = useState<HomeContent>();
   const [loading, setLoading] = useState(true);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [searchError, setSearchError] = useState("");
-
-  const isSearching = homeSearch.trim().length > 0;
-
-
-  async function loadStores() {
-    try {
-      const result = await getOfficialStores();
-      setStores(result);
-    } catch (error) {
-      console.log("ERROR HOME STORES:", error);
-      setStores([]);
-    }
-  }
-
-  function openStore(store: ShopXStore) {
-    if (!store?.slug) return;
-
-    router.push({
-      pathname: "/store/[slug]",
-      params: { slug: store.slug },
-    });
-  }
-
-  async function loadProducts() {
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [url, setUrl] = useState("");
+  const [location, setLocation] = useState("Configurar ubicación");
+  const load = useCallback(async (force = false) => {
     setLoading(true);
-    setErrorMessage("");
-
+    setError("");
     try {
-      const result = await getProducts(100);
-      setProducts(result);
-    } catch (error) {
-      console.log("ERROR HOME PRODUCTS:", error);
-      setErrorMessage("No pudimos cargar los productos.");
+      setContent(await getHomeContent(force));
+    } catch {
+      setError("No pudimos cargar los productos. Tocá para volver a intentar.");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-  }
-
-  async function loadDeliveryProfile() {
-    try {
-      const storedUser = await getStoredUser();
-      const storedLabel = buildDeliveryLabel(storedUser);
-
-      setDeliveryLabel(storedLabel || "");
-
-      if (!storedUser) return;
-
-      try {
-        const account = await getAppAccount();
-        const freshLabel = buildDeliveryLabel(account.user);
-        setDeliveryLabel(freshLabel || "");
-      } catch (error) {
-        console.log("ERROR HOME DELIVERY PROFILE:", error);
-      }
-    } catch (error) {
-      console.log("ERROR HOME STORED DELIVERY PROFILE:", error);
-      setDeliveryLabel("");
-    }
-  }
-
-  useEffect(() => {
-    loadProducts();
-    loadStores();
   }, []);
-
+  useEffect(() => {
+    void load();
+  }, [load]);
   useFocusEffect(
     useCallback(() => {
-      loadDeliveryProfile();
-    }, [])
+      let active = true;
+      getStoredUser().then((user) => {
+        if (active)
+          setLocation(
+            [user?.address?.city, user?.address?.province]
+              .filter(Boolean)
+              .join(", ") || "Configurar ubicación",
+          );
+      });
+      return () => {
+        active = false;
+      };
+    }, []),
   );
-
-  useEffect(() => {
-    const cleanQuery = homeSearch.trim();
-
-    if (!cleanQuery) {
-      setSearchResults([]);
-      setSearchError("");
-      setSearchLoading(false);
-      return;
-    }
-
-    const timeout = setTimeout(async () => {
-      setSearchLoading(true);
-      setSearchError("");
-
-      try {
-        const result = await searchProducts(cleanQuery);
-        setSearchResults(result);
-      } catch (error) {
-        console.log("ERROR HOME SEARCH:", error);
-        setSearchResults([]);
-        setSearchError("No pudimos buscar productos en este momento.");
-      }
-
-      setSearchLoading(false);
-    }, 400);
-
-    return () => clearTimeout(timeout);
-  }, [homeSearch]);
-
-  const featuredProducts = useMemo(() => products.slice(0, 8), [products]);
-  const recommendedProducts = useMemo(() => products.slice(8, 16), [products]);
-  const heroProduct = products[0];
-  const visibleProducts = isSearching ? searchResults : featuredProducts;
-  const heroImage = heroProduct ? getProductImage(heroProduct) : "";
-  const locationText = deliveryLabel || "Configurar ubicación";
-
+  const search = () =>
+    router.push({ pathname: "/search", params: { q: query.trim() } });
+  const sections = [
+    ...(content?.weeklyProducts?.length
+      ? [
+          {
+            key: "weekly",
+            title: "Lo más pedido de esta semana",
+            products: content.weeklyProducts,
+          },
+        ]
+      : []),
+    ...Object.entries(labels).map(([key, title]) => ({
+      key,
+      title,
+      products: content?.sections[key] || [],
+    })),
+  ];
   return (
-    <View style={styles.app}>
+    <View style={s.app}>
       <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 120,
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading && !!content}
+            onRefresh={() => load(true)}
+          />
+        }
         keyboardShouldPersistTaps="handled"
       >
-        <View style={[styles.topArea, { paddingTop: insets.top + 10 }]}>
-          <View style={styles.cleanHeader}>
-            <Image
-              source={require("../../assets/images/shopx-logo-horizontal.png")}
-              style={styles.cleanLogo}
-              resizeMode="contain"
-            />
-
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={styles.notificationButton}
-                activeOpacity={0.9}
-                onPress={() => router.push("/notifications")}
-              >
-                <Ionicons name="notifications-outline" size={19} color={text} />
-
-                {unreadCount > 0 ? <View style={styles.notificationDot} /> : null}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.favoriteHeaderButton,
-                  favoritesCount > 0 && styles.favoriteHeaderButtonActive,
-                ]}
-                activeOpacity={0.9}
-                onPress={() => router.push("/favorites")}
-              >
-                <Feather
-                  name="heart"
-                  size={19}
-                  color={favoritesCount > 0 ? white : text}
-                />
-
-                {favoritesCount > 0 ? (
-                  <View style={styles.favoriteBadge}>
-                    <Text style={styles.favoriteBadgeText}>
-                      {favoritesCount > 99 ? "99+" : favoritesCount}
-                    </Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cartButton}
-                activeOpacity={0.9}
-                onPress={() => router.push("/cart")}
-              >
-                <Feather name="shopping-cart" size={20} color={white} />
-
-                {cartCount > 0 ? (
-                  <View style={styles.cartBadge}>
-                    <Text style={styles.cartBadgeText}>
-                      {cartCount > 99 ? "99+" : cartCount}
-                    </Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            </View>
+        <View style={s.header}>
+          <Image
+            source={require("../../assets/images/shopx-logo-horizontal.png")}
+            resizeMode="contain"
+            style={{ width: 124, height: 42 }}
+          />
+          <View style={s.icons}>
+            <TouchableOpacity
+              accessibilityLabel="Notificaciones"
+              onPress={() => router.push("/notifications")}
+            >
+              <Feather name="bell" size={23} color="#062B4F" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel="Favoritos"
+              onPress={() => router.push("/favorites")}
+            >
+              <Feather name="heart" size={23} color="#062B4F" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={`Carrito, ${cartCount} productos`}
+              onPress={() => router.push("/cart")}
+            >
+              <Feather name="shopping-cart" size={23} color="#062B4F" />
+              {cartCount > 0 && <Text style={s.badge}>{cartCount}</Text>}
+            </TouchableOpacity>
           </View>
-
-          <View style={styles.searchLocationCard}>
-            <View style={styles.cyanAccent} />
-
-            <View style={styles.searchLocationRow}>
-              <Feather name="search" size={23} color="#64748B" />
-
-              <TextInput
-                value={homeSearch}
-                onChangeText={setHomeSearch}
-                placeholder="Buscar productos, marcas..."
-                placeholderTextColor="#95A3B8"
-                style={styles.searchInput}
-                returnKeyType="search"
-                autoCorrect={false}
-                autoCapitalize="none"
-              />
-
-              {homeSearch.length > 0 ? (
+        </View>
+        <TouchableOpacity
+          style={s.location}
+          onPress={() => router.push("/profile")}
+        >
+          <Feather name="map-pin" size={14} color="#617590" />
+          <Text style={s.small}>Enviar a {location}</Text>
+        </TouchableOpacity>
+        <View style={s.search}>
+          <Feather name="search" size={20} color="#617590" />
+          <TextInput
+            accessibilityLabel="Buscar productos"
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Amazon, eBay y marcas de USA"
+            style={s.input}
+            returnKeyType="search"
+            onSubmitEditing={search}
+          />
+          <TouchableOpacity accessibilityLabel="Buscar" onPress={search}>
+            <Feather name="arrow-right" size={22} color="#062B4F" />
+          </TouchableOpacity>
+        </View>
+        <View style={s.hero}>
+          <Text style={s.kicker}>SHOPX ARGENTINA</Text>
+          <Text style={s.heroTitle}>
+            Comprá en USA.{"\n"}Recibí en Argentina.
+          </Text>
+          <Text style={s.heroText}>Sin trámites, sin sorpresas.</Text>
+          <TouchableOpacity style={s.primary} onPress={search}>
+            <Text style={s.primaryText}>Explorar productos</Text>
+            <Feather name="arrow-right" size={18} color="#062B4F" />
+          </TouchableOpacity>
+        </View>
+        <View style={s.section}>
+          <Text style={s.heading}>Elegí cómo querés comprar</Text>
+          <View style={s.paths}>
+            <TouchableOpacity style={s.path} onPress={search}>
+              <Feather name="search" size={24} color="#062B4F" />
+              <Text style={s.pathTitle}>Quiero descubrir</Text>
+              <Text style={s.small}>
+                Buscá productos de Amazon, eBay y marcas de USA.
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.path}
+              onPress={() => router.push("/quote")}
+            >
+              <Feather name="link" size={24} color="#062B4F" />
+              <Text style={s.pathTitle}>Ya sé qué quiero</Text>
+              <Text style={s.small}>
+                Pegá el link y conocé el precio puesto en Argentina.
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <View style={s.quote}>
+          <Text style={s.heading}>Pegá un link y cotizá</Text>
+          <TextInput
+            accessibilityLabel="Link para cotizar"
+            value={url}
+            onChangeText={setUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder="Link de una tienda de USA"
+            style={s.linkInput}
+          />
+          <TouchableOpacity
+            style={s.primary}
+            onPress={() =>
+              router.push({ pathname: "/quote", params: { url: url.trim() } })
+            }
+          >
+            <Text style={s.primaryText}>Cotizar mi producto</Text>
+            <Feather name="arrow-right" size={18} color="#062B4F" />
+          </TouchableOpacity>
+          <Text style={s.small}>
+            Hasta cinco links de dos tiendas. Producto, impuestos y envío antes
+            de pagar.
+          </Text>
+        </View>
+        {loading && !content && (
+          <ActivityIndicator style={{ margin: 24 }} color="#062B4F" />
+        )}
+        {!!error && (
+          <TouchableOpacity style={s.section} onPress={() => load(true)}>
+            <Text style={s.small}>{error}</Text>
+          </TouchableOpacity>
+        )}
+        {sections.map((section) => (
+          <View key={section.key} style={s.section}>
+            <View style={s.sectionHeader}>
+              <Text style={s.heading}>{section.title}</Text>
+              {section.key !== "weekly" && (
                 <TouchableOpacity
-                  style={styles.clearButton}
-                  onPress={() => setHomeSearch("")}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/categories",
+                      params: { category: section.key },
+                    })
+                  }
                 >
-                  <Text style={styles.clearSearch}>×</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.cameraButton} activeOpacity={0.9}>
-                  <Ionicons name="camera-outline" size={20} color={text} />
+                  <Text style={s.more}>Ver todos</Text>
                 </TouchableOpacity>
               )}
             </View>
-
-            <View style={styles.integratedDivider} />
-
-            <TouchableOpacity
-              style={styles.deliveryRow}
-              activeOpacity={0.9}
-              onPress={() => router.push("/profile")}
-            >
-              <Feather name="map-pin" size={19} color={text} />
-
-              <Text style={styles.deliveryText} numberOfLines={1}>
-                Enviar a:{" "}
-                <Text style={styles.deliveryStrong}>{locationText}</Text>
-              </Text>
-
-              <Feather name="chevron-down" size={17} color={text} />
-            </TouchableOpacity>
-          </View>
-
-          {!isSearching && (
-            <>
-              <View style={styles.benefitStrip}>
-                <View style={styles.benefitStripItem}>
-                  <View style={styles.benefitStripIcon}>
-                    <MaterialCommunityIcons
-                      name="currency-usd"
-                      size={21}
-                      color={navy}
-                    />
-                  </View>
-
-                  <View style={styles.benefitTextBox}>
-                    <Text style={styles.benefitMain}>Precio final</Text>
-                    <Text style={styles.benefitAccent}>en pesos</Text>
-                  </View>
-                </View>
-
-                <View style={styles.benefitVerticalDivider} />
-
-                <View style={styles.benefitStripItem}>
-                  <View style={styles.benefitStripIcon}>
-                    <MaterialCommunityIcons
-                      name="truck-delivery-outline"
-                      size={23}
-                      color={navy}
-                    />
-                  </View>
-
-                  <View style={styles.benefitTextBox}>
-                    <Text style={styles.benefitMain}>Entrega</Text>
-                    <Text style={styles.benefitAccent}>5–10 días</Text>
-                  </View>
-                </View>
-
-                <View style={styles.benefitVerticalDivider} />
-
-                <View style={styles.benefitStripItem}>
-                  <View style={styles.benefitStripIcon}>
-                    <MaterialCommunityIcons
-                      name="shield-check-outline"
-                      size={23}
-                      color={navy}
-                    />
-                  </View>
-
-                  <View style={styles.benefitTextBox}>
-                    <Text style={styles.benefitMain}>Compra</Text>
-                    <Text style={styles.benefitAccent}>protegida</Text>
-                  </View>
-                </View>
-              </View>
-
-              {stores.length > 0 ? (
-                <View style={styles.storesBlock}>
-                  <View style={styles.storesHeader}>
-                    <View>
-                      <Text style={styles.storesEyebrow}>SHOPX ACCESS</Text>
-                      <Text style={styles.storesTitle}>Tiendas oficiales</Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.storesViewAllButton}
-                      activeOpacity={0.85}
-                      onPress={() => router.push("/stores")}
-                    >
-                      <Text style={styles.storesViewAllText}>Ver todas</Text>
-                      <Feather name="arrow-up-right" size={15} color={accent} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.storesRow}
-                  >
-                    {stores.map((store) => {
-                      const localLogo = getStoreLogoSource(store.slug);
-                      const remoteLogo = canUseRemoteStoreLogo(store.logo);
-                      const logoText = getStoreLogoWordmark(store);
-
-                      return (
-                        <TouchableOpacity
-                          key={store.slug}
-                          style={styles.storeCard}
-                          activeOpacity={0.9}
-                          onPress={() => openStore(store)}
-                        >
-                          <View style={styles.storeAccent} />
-
-                          <View style={styles.storeLogoBox}>
-                            {localLogo ? (
-                              <Image
-                                source={localLogo}
-                                style={styles.storeLogo}
-                                resizeMode="contain"
-                              />
-                            ) : remoteLogo ? (
-                              <Image
-                                source={{ uri: store.logo }}
-                                style={styles.storeLogo}
-                                resizeMode="contain"
-                              />
-                            ) : (
-                              <Text style={styles.storeWordmark} numberOfLines={2}>
-                                {logoText}
-                              </Text>
-                            )}
-                          </View>
-
-                          <Text style={styles.storeName} numberOfLines={1}>
-                            {store.name}
-                          </Text>
-                          <Text style={styles.storeSubtitle}>Tienda USA</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              ) : null}
-
+            {section.products.length ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.categoriesRow}
+                contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
               >
-                {categories.map((category, index) => {
-                  const active = index === 0;
-
-                  return (
-                    <TouchableOpacity
-                      key={category.label}
-                      style={styles.categoryItem}
-                      activeOpacity={0.9}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/categories",
-                          params: { category: category.label },
-                        })
-                      }
-                    >
-                      <View
-                        style={[
-                          styles.categoryIcon,
-                          active && styles.categoryIconActive,
-                        ]}
-                      >
-                        <CategoryIcon
-                          icon={category.icon}
-                          type={category.type}
-                          active={active}
-                        />
-                      </View>
-
-                      <Text
-                        style={[
-                          styles.categoryLabel,
-                          active && styles.categoryLabelActive,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {category.label}
-                      </Text>
-
-                      {active && <View style={styles.activeUnderline} />}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              <TouchableOpacity
-                activeOpacity={0.92}
-                onPress={() => {
-                  if (heroProduct) {
-                    openProduct(heroProduct);
-                  } else {
-                    router.push("/categories");
-                  }
-                }}
-              >
-                <LinearGradient
-                  colors={[navyDeep, navyDark, "#083B69"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.heroCard}
-                >
-                  <View style={styles.heroLeft}>
-                    <View style={styles.heroPill}>
-                      <Text style={styles.heroFlag}>🇺🇸</Text>
-                      <Text style={styles.heroPillText}>Comprá en USA</Text>
-                    </View>
-
-                    <Text style={styles.heroTitle}>
-                      Comprá{"\n"}en{"\n"}USA.{"\n"}Recibí en{"\n"}
-                      <Text style={styles.heroAccent}>Argentina</Text>
-                    </Text>
-
-                    <Text style={styles.heroSubtitle}>
-                      Productos originales,{"\n"}precio final y{"\n"}seguimiento
-                      real.
-                    </Text>
-
-                    <TouchableOpacity
-                      style={styles.heroButton}
-                      onPress={() => router.push("/categories")}
-                    >
-                      <Text style={styles.heroButtonText}>Ver productos</Text>
-                      <Feather name="arrow-right" size={18} color={text} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.heroProduct}>
-                    <Text style={styles.heroProductLabel} numberOfLines={2}>
-                      {heroProduct?.title || 'MacBook Pro 16"'}
-                    </Text>
-
-                    <Text style={styles.heroProductPrice}>
-                      {heroProduct
-                        ? `USD ${formatUSD(
-                            getDisplayFinalPriceUSD(heroProduct)
-                          )}`
-                        : "USD 2,499"}
-                    </Text>
-
-                    <View style={styles.starsRow}>
-                      <Text style={styles.stars}>★ ★ ★ ★ ◐</Text>
-                      <Text style={styles.reviews}>(128)</Text>
-                    </View>
-
-                    <View style={styles.productVisual}>
-                      {heroImage ? (
-                        <Image
-                          source={{ uri: heroImage }}
-                          style={styles.heroProductImage}
-                        />
-                      ) : (
-                        <Image
-                          source={{
-                            uri: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/mbp16-spaceblack-select-202410",
-                          }}
-                          style={styles.heroProductImage}
-                        />
-                      )}
-                    </View>
-
-                    <View style={styles.heroDots}>
-                      <View style={styles.dotActive} />
-                      <View style={styles.dot} />
-                      <View style={styles.dot} />
-                    </View>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <View style={styles.sectionIcon}>
-              <Feather name="star" size={17} color={white} />
-            </View>
-
-            <Text
-              style={styles.sectionTitle}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-            >
-              {isSearching
-                ? `Resultados para "${homeSearch}"`
-                : "Productos destacados"}
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.viewAllButton}
-            onPress={() =>
-              isSearching ? setHomeSearch("") : router.push("/categories")
-            }
-          >
-            <Text style={styles.viewAll}>
-              {isSearching ? "Limpiar" : "Ver todos"}
-            </Text>
-            <Feather name="chevron-right" size={22} color={accent} />
-          </TouchableOpacity>
-        </View>
-
-        {loading && !isSearching ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator color={navy} />
-            <Text style={styles.loadingText}>Cargando productos...</Text>
-          </View>
-        ) : searchLoading ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator color={navy} />
-            <Text style={styles.loadingText}>Buscando productos...</Text>
-          </View>
-        ) : errorMessage && !isSearching ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>No pudimos cargar productos</Text>
-            <Text style={styles.errorText}>{errorMessage}</Text>
-
-            <TouchableOpacity style={styles.retryButton} onPress={loadProducts}>
-              <Text style={styles.retryButtonText}>Reintentar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : searchError ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>No pudimos buscar productos</Text>
-            <Text style={styles.errorText}>{searchError}</Text>
-
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => {
-                const currentSearch = homeSearch;
-                setHomeSearch("");
-                setTimeout(() => setHomeSearch(currentSearch), 80);
-              }}
-            >
-              <Text style={styles.retryButtonText}>Reintentar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : visibleProducts.length === 0 ? (
-          <View style={styles.emptySearchBox}>
-            <Feather name="search" size={42} color={muted} />
-            <Text style={styles.emptySearchTitle}>No encontramos productos</Text>
-            <Text style={styles.emptySearchText}>
-              Probá buscar por marca, modelo o categoría.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.productsGrid}>
-            {visibleProducts.map((product, index) => {
-              const key =
-                product._id ||
-                product.id ||
-                product.slug ||
-                `${product.title}-${index}`;
-
-              return (
-                <View key={key} style={styles.productGridItem}>
-                  <ProductCard
-                    product={product}
-                    variant="deal"
-                    onPress={() => openProduct(product)}
-                  />
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {!isSearching && (
-          <>
-            <LinearGradient
-              colors={[navyDark, navy]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.quoteBanner}
-            >
-              <View style={styles.quoteIcon}>
-                <Feather name="link" size={24} color={navy} />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.quoteTitle}>¿Viste algo en USA?</Text>
-                <Text style={styles.quoteText}>
-                  Pegá el link y te cotizamos el precio final en Argentina.
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.quoteButton}
-                onPress={() => router.push("/quote")}
-              >
-                <Text style={styles.quoteButtonText}>Cotizar</Text>
-              </TouchableOpacity>
-            </LinearGradient>
-
-            <View style={styles.sectionHeaderSimple}>
-              <Text style={styles.sectionTitle}>Curado por ShopX</Text>
-
-              <TouchableOpacity
-                style={styles.viewAllButton}
-                onPress={() => router.push("/categories")}
-              >
-                <Text style={styles.viewAll}>Ver todo</Text>
-                <Feather name="chevron-right" size={22} color={accent} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.productsGrid}>
-              {(recommendedProducts.length > 0
-                ? recommendedProducts
-                : featuredProducts
-              ).map((product, index) => {
-                const key =
-                  product._id ||
-                  product.id ||
-                  product.slug ||
-                  `recommended-${product.title}-${index}`;
-
-                return (
-                  <View key={key} style={styles.productGridItem}>
+                {section.products.map((product) => (
+                  <View
+                    key={product._id || product.slug}
+                    style={{ width: 190 }}
+                  >
                     <ProductCard
                       product={product}
-                      variant="compact"
-                      showCartButton={false}
                       onPress={() => openProduct(product)}
+                      showFooter
                     />
                   </View>
-                );
-              })}
+                ))}
+              </ScrollView>
+            ) : (
+              !loading && (
+                <Text style={s.small}>
+                  Explorá más productos en esta categoría.
+                </Text>
+              )
+            )}
+          </View>
+        ))}
+        <TouchableOpacity
+          style={[s.guide, { marginHorizontal: 18, marginTop: 26 }]}
+          onPress={() => router.push("/stores")}
+        >
+          <Text style={s.heading}>Tiendas oficiales</Text>
+          <Text style={s.small}>
+            Explorá las marcas de USA y encontrá tu próximo producto.
+          </Text>
+          <Text style={s.more}>Ver tiendas →</Text>
+        </TouchableOpacity>
+        <View style={s.section}>
+          <Text style={s.heading}>Cómo funciona ShopX</Text>
+          {[
+            "Elegí o cotizá tu producto",
+            "Conocé el precio final antes de pagar",
+            "Recibilo en tu casa y seguí cada etapa",
+          ].map((step, i) => (
+            <View key={step} style={s.step}>
+              <Text style={s.stepNumber}>0{i + 1}</Text>
+              <Text style={s.pathTitle}>{step}</Text>
             </View>
-          </>
-        )}
-
-        <View style={{ height: 145 }} />
+          ))}
+        </View>
+        <View style={s.section}>
+          <Text style={s.heading}>Selecciones ShopX</Text>
+          {guides.map((guide) => (
+            <TouchableOpacity
+              key={guide.path}
+              style={s.guide}
+              onPress={() => Linking.openURL(buildApiUrl(guide.path))}
+            >
+              <Text style={s.pathTitle}>{guide.title}</Text>
+              <Text style={s.small}>{guide.text}</Text>
+              <Text style={s.more}>Explorar →</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={s.section}>
+          <Text style={s.heading}>Comprá con tranquilidad</Text>
+          <Text style={s.small}>
+            Pagá con Mercado Pago. Las cuotas y su costo se muestran al pagar.
+            Seguí tus pedidos desde la compra hasta la entrega.
+          </Text>
+          <TouchableOpacity onPress={() => router.push("/orders")}>
+            <Text style={s.more}>Ver mis pedidos →</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => Linking.openURL(buildApiUrl("/ayuda"))}
+          >
+            <Text style={s.more}>Ayuda y políticas →</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
-
       <AppBottomNav />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  app: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-
-  screen: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-
-  content: {
-    paddingBottom: 0,
-  },
-
-  topArea: {
-    paddingHorizontal: 18,
-    paddingBottom: 4,
-    backgroundColor: soft,
-  },
-
-  cleanHeader: {
-    minHeight: 58,
+const s = StyleSheet.create({
+  app: { flex: 1, backgroundColor: "#F7FAFC" },
+  header: {
+    paddingHorizontal: 20,
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-  },
-
-  cleanLogo: {
-    width: 132,
-    height: 40,
-  },
-
-  headerActions: {
-    flexDirection: "row",
     alignItems: "center",
-    gap: 9,
   },
-
-  notificationButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: "#DDE7F0",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-
-    shadowColor: navy,
-    shadowOpacity: 0.07,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 2,
-  },
-
-  notificationDot: {
+  icons: { flexDirection: "row", gap: 20 },
+  badge: {
     position: "absolute",
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: accent,
-  },
-
-  favoriteHeaderButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: "#DDE7F0",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-
-    shadowColor: navy,
-    shadowOpacity: 0.07,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 2,
-  },
-
-  favoriteHeaderButtonActive: {
-    backgroundColor: accent,
-    borderColor: accent,
-    shadowColor: accent,
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-  },
-
-  favoriteBadge: {
-    position: "absolute",
-    top: -3,
-    right: -3,
-    minWidth: 19,
-    height: 19,
-    paddingHorizontal: 4,
+    right: -8,
+    top: -10,
+    backgroundColor: "#18C7D8",
+    color: "#062B4F",
     borderRadius: 10,
-    backgroundColor: navy,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: soft,
-  },
-
-  favoriteBadgeText: {
-    color: white,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-
-  cartButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: navy,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-
-    shadowColor: navy,
-    shadowOpacity: 0.14,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-  },
-
-  cartBadge: {
-    position: "absolute",
-    top: -3,
-    right: -3,
-    minWidth: 19,
-    height: 19,
-    paddingHorizontal: 4,
-    borderRadius: 10,
-    backgroundColor: accent,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: soft,
-  },
-
-  cartBadgeText: {
-    color: white,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-
-  searchLocationCard: {
-    marginTop: 5,
-    minHeight: 116,
-    borderRadius: 24,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: "#DDE7F0",
-    overflow: "hidden",
-
-    shadowColor: navy,
-    shadowOpacity: 0.055,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
-  },
-
-  cyanAccent: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    backgroundColor: accent,
-    borderTopLeftRadius: 24,
-    borderBottomLeftRadius: 24,
-  },
-
-  searchLocationRow: {
-    minHeight: 59,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingLeft: 21,
-    paddingRight: 15,
-  },
-
-  searchInput: {
-    flex: 1,
-    color: text,
-    fontSize: 14,
-    fontWeight: "600",
-    marginLeft: 11,
-    paddingVertical: 0,
-  },
-
-  cameraButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    backgroundColor: "#EEF2F7",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  clearButton: {
-    width: 38,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  clearSearch: {
-    color: "#8FA0B6",
-    fontSize: 28,
-    fontWeight: "900",
-  },
-
-  integratedDivider: {
-    height: 1,
-    backgroundColor: "#E6ECF2",
-    marginLeft: 21,
-    marginRight: 21,
-  },
-
-  deliveryRow: {
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingLeft: 21,
-    paddingRight: 17,
-  },
-
-  deliveryText: {
-    flex: 1,
-    marginLeft: 11,
-    color: muted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-
-  deliveryStrong: {
-    color: text,
-    fontWeight: "900",
-  },
-
-  benefitStrip: {
-    marginTop: 17,
-    minHeight: 72,
-    borderRadius: 22,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: "#E0E8F0",
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    alignItems: "center",
-
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
-
-  benefitStripItem: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-  },
-
-  benefitStripIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-
-  benefitTextBox: {
-    minWidth: 0,
-  },
-
-  benefitMain: {
-    color: text,
-    fontSize: 11.5,
-    lineHeight: 15,
+    paddingHorizontal: 5,
+    fontSize: 11,
     fontWeight: "800",
   },
-
-  benefitAccent: {
-    color: accent,
-    fontSize: 11.5,
-    lineHeight: 15,
-    fontWeight: "900",
-  },
-
-  benefitVerticalDivider: {
-    width: 1,
-    height: 38,
-    backgroundColor: "#DDE6EF",
-  },
-
-
-  storesBlock: {
-    marginTop: 17,
-  },
-
-  storesHeader: {
+  location: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    marginBottom: 12,
+    gap: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
   },
-
-  storesEyebrow: {
-    color: accent,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.4,
-  },
-
-  storesTitle: {
-    marginTop: 3,
-    color: text,
-    fontSize: 21,
-    fontWeight: "900",
-    letterSpacing: -0.45,
-  },
-
-  storesViewAllButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingBottom: 3,
-  },
-
-  storesViewAllText: {
-    color: accent,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-
-  storesRow: {
-    gap: 12,
-    paddingLeft: 1,
-    paddingRight: 18,
-    paddingBottom: 4,
-  },
-
-  storeCard: {
-    width: 126,
-    minHeight: 132,
-    borderRadius: 24,
-    backgroundColor: white,
+  search: {
+    marginHorizontal: 18,
+    marginBottom: 18,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: "#FFF",
     borderWidth: 1,
-    borderColor: "#DDE7F0",
-    padding: 13,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-
-    shadowColor: navy,
-    shadowOpacity: 0.055,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 2,
-  },
-
-  storeAccent: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: accent,
-  },
-
-  storeLogoBox: {
-    width: 58,
-    height: 58,
-    borderRadius: 20,
-    backgroundColor: "#F8FAFC",
-    borderWidth: 1,
-    borderColor: "#E7EEF5",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 5,
-    marginBottom: 12,
-    alignSelf: "center",
-  },
-
-  storeLogo: {
-    width: 45,
-    height: 32,
-  },
-
-  storeWordmark: {
-    color: navy,
-    fontSize: 13,
-    lineHeight: 15,
-    fontWeight: "900",
-    textAlign: "center",
-    letterSpacing: -0.2,
-  },
-
-  storeName: {
-    color: text,
-    fontSize: 14,
-    fontWeight: "900",
-    textAlign: "center",
-    width: "100%",
-  },
-
-  storeSubtitle: {
-    marginTop: 3,
-    color: muted,
-    fontSize: 11,
-    fontWeight: "700",
-    textAlign: "center",
-    width: "100%",
-  },
-
-  categoriesRow: {
-    paddingTop: 21,
-    paddingBottom: 12,
-    gap: 14,
-  },
-
-  categoryItem: {
-    width: 62,
-    alignItems: "center",
-    position: "relative",
-    paddingBottom: 10,
-  },
-
-  categoryIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: "#DDE7F0",
-    alignItems: "center",
-    justifyContent: "center",
-
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 2,
-  },
-
-  categoryIconActive: {
-    backgroundColor: navy,
-    borderColor: navy,
-    shadowOpacity: 0.13,
-  },
-
-  categoryLabel: {
-    marginTop: 8,
-    color: "#667995",
-    fontSize: 11.5,
-    fontWeight: "800",
-  },
-
-  categoryLabelActive: {
-    color: text,
-    fontWeight: "900",
-  },
-
-  activeUnderline: {
-    position: "absolute",
-    bottom: 0,
-    width: 42,
-    height: 3,
-    borderRadius: 99,
-    backgroundColor: accent,
-  },
-
-  heroCard: {
-    marginTop: 12,
-    minHeight: 255,
-    borderRadius: 26,
-    padding: 16,
+    borderColor: "#E2E8F0",
     flexDirection: "row",
-    overflow: "hidden",
-    shadowColor: navy,
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
-  },
-
-  heroLeft: {
-    flex: 1,
-    justifyContent: "space-between",
-    zIndex: 2,
-    paddingRight: 8,
-  },
-
-  heroPill: {
-    alignSelf: "flex-start",
-    height: 26,
-    borderRadius: 99,
-    paddingHorizontal: 9,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    maxWidth: 130,
-  },
-
-  heroFlag: {
-    fontSize: 13,
-  },
-
-  heroPillText: {
-    color: white,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-
-  heroTitle: {
-    marginTop: 10,
-    color: white,
-    fontSize: 23,
-    lineHeight: 26,
-    fontWeight: "900",
-    letterSpacing: -0.7,
-  },
-
-  heroAccent: {
-    color: accent,
-  },
-
-  heroSubtitle: {
-    marginTop: 10,
-    color: "rgba(255,255,255,0.86)",
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600",
-  },
-
-  heroButton: {
-    marginTop: 14,
-    width: 132,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: white,
-    flexDirection: "row",
-    justifyContent: "center",
     alignItems: "center",
     gap: 8,
   },
-
-  heroButtonText: {
-    color: text,
-    fontSize: 13,
+  input: { flex: 1, height: 50, color: "#062B4F" },
+  hero: {
+    marginHorizontal: 18,
+    padding: 24,
+    borderRadius: 26,
+    backgroundColor: "#062B4F",
+    gap: 14,
+  },
+  kicker: {
+    color: "#18C7D8",
+    fontSize: 11,
+    letterSpacing: 2,
+    fontWeight: "800",
+  },
+  heroTitle: {
+    color: "#FFF",
+    fontSize: 35,
+    lineHeight: 40,
     fontWeight: "900",
+    letterSpacing: -1.4,
   },
-
-  heroProduct: {
-    width: 145,
-    borderRadius: 22,
-    borderWidth: 1.4,
-    borderColor: "rgba(255,255,255,0.22)",
-    backgroundColor: "rgba(255,255,255,0.07)",
-    padding: 12,
-    alignSelf: "center",
-  },
-
-  heroProductLabel: {
-    color: white,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-
-  heroProductPrice: {
-    marginTop: 5,
-    color: accent,
-    fontSize: 15,
-    fontWeight: "900",
-  },
-
-  starsRow: {
-    marginTop: 6,
+  heroText: { color: "#D1E0EE", fontSize: 17 },
+  primary: {
+    backgroundColor: "#22D3EE",
+    padding: 16,
+    borderRadius: 14,
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 4,
   },
-
-  stars: {
-    color: yellow,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-
-  reviews: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-
-  productVisual: {
-    marginTop: 11,
-    height: 88,
-    borderRadius: 9,
-    backgroundColor: white,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-
-  heroProductImage: {
-    width: "95%",
-    height: "95%",
-    resizeMode: "contain",
-  },
-
-  heroDots: {
-    marginTop: 10,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 7,
-  },
-
-  dotActive: {
-    width: 7,
-    height: 7,
-    borderRadius: 99,
-    backgroundColor: accent,
-  },
-
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 99,
-    backgroundColor: "rgba(255,255,255,0.35)",
-  },
-
+  primaryText: { color: "#062B4F", fontWeight: "800", fontSize: 15 },
+  section: { marginTop: 26, paddingHorizontal: 18, gap: 14 },
+  heading: { fontSize: 22, fontWeight: "800", color: "#071E35", flexShrink: 1 },
   sectionHeader: {
-    paddingHorizontal: 22,
-    marginTop: 24,
-    marginBottom: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 10,
   },
-
-  sectionHeaderSimple: {
-    paddingHorizontal: 22,
-    marginTop: 30,
-    marginBottom: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  sectionTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  small: { color: "#617590", fontSize: 13, lineHeight: 20 },
+  paths: { flexDirection: "row", gap: 12 },
+  path: {
     flex: 1,
-    minWidth: 0,
-    gap: 12,
-  },
-
-  sectionIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  sectionTitle: {
-    flex: 1,
-    color: text,
-    fontSize: 24,
-    fontWeight: "900",
-    letterSpacing: -0.5,
-  },
-
-  viewAllButton: {
-    flexShrink: 0,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  viewAll: {
-    color: accent,
-    fontSize: 15,
-    fontWeight: "900",
-  },
-
-  loadingBox: {
-    marginHorizontal: 22,
-    borderRadius: 24,
+    backgroundColor: "#FFF",
     borderWidth: 1,
-    borderColor: border,
-    backgroundColor: white,
-    padding: 24,
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    padding: 16,
+    gap: 10,
   },
-
-  loadingText: {
-    color: muted,
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 10,
+  pathTitle: {
+    color: "#062B4F",
+    fontSize: 16,
+    fontWeight: "800",
+    flexShrink: 1,
   },
-
-  errorBox: {
-    marginHorizontal: 22,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: white,
-    padding: 24,
-  },
-
-  errorTitle: {
-    color: text,
-    fontSize: 18,
-    fontWeight: "900",
-    marginBottom: 6,
-  },
-
-  errorText: {
-    color: muted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 14,
-  },
-
-  retryButton: {
-    alignSelf: "flex-start",
-    backgroundColor: navy,
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-  },
-
-  retryButtonText: {
-    color: white,
-    fontWeight: "900",
-    fontSize: 14,
-  },
-
-  emptySearchBox: {
-    marginHorizontal: 22,
-    borderRadius: 24,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 26,
-    alignItems: "center",
-  },
-
-  emptySearchTitle: {
-    color: text,
-    fontSize: 20,
-    fontWeight: "900",
-    marginTop: 12,
-    marginBottom: 6,
-  },
-
-  emptySearchText: {
-    color: muted,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: "center",
-  },
-
-  productsGrid: {
-    paddingHorizontal: 6,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 0.2,
-  },
-
-  productGridItem: {
-    width: "50%",
-    paddingHorizontal: 0.2,
-    marginBottom: 0.2,
-  },
-
-  quoteBanner: {
-    marginHorizontal: 22,
-    marginTop: 30,
-    borderRadius: 24,
+  quote: {
+    margin: 18,
+    marginBottom: 0,
     padding: 18,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
+    backgroundColor: "#EAFBFD",
+    borderRadius: 22,
+    gap: 14,
   },
-
-  quoteIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: white,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
+  linkInput: {
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: "#FFF",
+    color: "#062B4F",
   },
-
-  quoteTitle: {
-    color: white,
-    fontSize: 17,
-    fontWeight: "900",
-    marginBottom: 4,
-  },
-
-  quoteText: {
-    color: "#D7E2EF",
+  more: {
+    color: "#087F91",
+    fontWeight: "700",
     fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
+    paddingVertical: 6,
   },
-
-  quoteButton: {
-    backgroundColor: white,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginLeft: 10,
-  },
-
-  quoteButtonText: {
-    color: text,
-    fontSize: 13,
-    fontWeight: "900",
+  step: { flexDirection: "row", alignItems: "center", gap: 14 },
+  stepNumber: { color: "#087F91", fontSize: 24, fontWeight: "800" },
+  guide: {
+    padding: 18,
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    gap: 8,
   },
 });

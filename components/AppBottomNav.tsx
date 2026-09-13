@@ -1,3 +1,4 @@
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, usePathname } from "expo-router";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -11,7 +12,9 @@ const white = "#FFFFFF";
 function isActive(pathname: string, matches: string[]) {
   return matches.some((match) => {
     if (match === "/") {
-      return pathname === "/" || pathname === "/index" || pathname === "/(tabs)";
+      return (
+        pathname === "/" || pathname === "/index" || pathname === "/(tabs)"
+      );
     }
 
     return pathname.startsWith(match);
@@ -20,6 +23,7 @@ function isActive(pathname: string, matches: string[]) {
 
 export function AppBottomNav() {
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
 
   const homeActive = isActive(pathname, ["/"]);
   const categoriesActive = isActive(pathname, ["/categories"]);
@@ -28,7 +32,9 @@ export function AppBottomNav() {
   const profileActive = isActive(pathname, ["/profile"]);
 
   return (
-    <View style={styles.bottomNavWrap}>
+    <View
+      style={[styles.bottomNavWrap, { bottom: Math.max(12, insets.bottom) }]}
+    >
       <View style={styles.bottomNav}>
         <TouchableOpacity
           style={styles.navItem}
@@ -52,10 +58,7 @@ export function AppBottomNav() {
             color={categoriesActive ? accent : muted}
           />
           <Text
-            style={[
-              styles.navLabel,
-              categoriesActive && styles.navLabelActive,
-            ]}
+            style={[styles.navLabel, categoriesActive && styles.navLabelActive]}
           >
             Categorías
           </Text>
@@ -80,7 +83,9 @@ export function AppBottomNav() {
           onPress={() => router.push("/orders")}
         >
           <Feather name="box" size={23} color={ordersActive ? accent : muted} />
-          <Text style={[styles.navLabel, ordersActive && styles.navLabelActive]}>
+          <Text
+            style={[styles.navLabel, ordersActive && styles.navLabelActive]}
+          >
             Pedidos
           </Text>
         </TouchableOpacity>
@@ -90,8 +95,14 @@ export function AppBottomNav() {
           activeOpacity={0.85}
           onPress={() => router.push("/profile")}
         >
-          <Feather name="user" size={23} color={profileActive ? accent : muted} />
-          <Text style={[styles.navLabel, profileActive && styles.navLabelActive]}>
+          <Feather
+            name="user"
+            size={23}
+            color={profileActive ? accent : muted}
+          />
+          <Text
+            style={[styles.navLabel, profileActive && styles.navLabelActive]}
+          >
             Mi cuenta
           </Text>
         </TouchableOpacity>

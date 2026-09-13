@@ -1,5 +1,7 @@
+import { PriceSummary } from "../components/PriceSummary";
+import { CartPreview, previewCart, checkoutItems } from "../lib/cart-pricing";
 import { useFocusEffect, router } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,25 +25,11 @@ import {
 import {
   DomesticPricingDestination,
   formatUSD,
-  getDisplayFinalPriceUSD,
-  getProductBySlug,
   getProductImage,
   getSelectedOptionsSummary,
-  resolveProductsBySlugs,
-  resolveProductsForCartItems,
-  ShopXProduct,
 } from "../lib/api";
-import {
-  createMercadoPagoCheckout,
-  getExchangeRate,
-  PricingBreakdownRow,
-} from "../lib/orders";
-import {
-  fetchCurrentUser,
-  getAppAccount,
-  getStoredUser,
-  ShopXUser,
-} from "../lib/auth";
+import { createMercadoPagoCheckout, PricingBreakdownRow } from "../lib/orders";
+import { getAppAccount, getStoredUser, ShopXUser } from "../lib/auth";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -55,11 +43,6 @@ const green = "#0EA371";
 const greenSoft = "#E7FFF4";
 const orange = "#F59E0B";
 const orangeSoft = "#FFF7E6";
-
-type BreakdownRow = {
-  label: string;
-  amount: number;
-};
 
 function normalizeText(value?: string | number | null) {
   return String(value || "")
@@ -101,271 +84,9 @@ function getBrand(item: CartItem) {
   ).toUpperCase();
 }
 
-function getItemFinalPriceUSD(item: CartItem) {
-  return getDisplayFinalPriceUSD(item.product) || 0;
-}
-
 function getUserDisplayName(user: ShopXUser | null) {
   if (!user) return "";
   return user.fullName || user.name || user.email || "Usuario ShopX";
-}
-
-function normalizeBreakdownLabel(label: string) {
-  const clean = normalizeText(label);
-
-  if (clean.includes("producto")) return "Precio Productos USA";
-  if (clean.includes("iva")) return "IVA importación (21%)";
-  if (clean.includes("flete") || clean.includes("internacional")) {
-    return "Flete Internacional";
-  }
-  if (clean.includes("aduana") || clean.includes("tasas")) {
-    return "Aduana y Tasas";
-  }
-  if (
-    clean.includes("gestión") ||
-    clean.includes("gestion") ||
-    clean.includes("seguro") ||
-    clean.includes("shopx")
-  ) {
-    return "Gestión y Seguro ShopX";
-  }
-  if (clean.includes("nacional") || clean.includes("local")) {
-    return "Logística Nacional";
-  }
-
-  return String(label || "Concepto");
-}
-
-function getBreakdownLabel(row: any) {
-  return String(row?.label ?? row?.name ?? row?.concept ?? row?.title ?? "");
-}
-
-function getBreakdownAmount(row: any) {
-  const value =
-    row?.amount ??
-    row?.amountUSD ??
-    row?.value ??
-    row?.usd ??
-    row?.priceUSD ??
-    row?.totalUSD ??
-    row?.total ??
-    0;
-
-  const numberValue = Number(value);
-
-  return Number.isFinite(numberValue) ? numberValue : 0;
-}
-
-function getProductBreakdown(product: ShopXProduct): BreakdownRow[] {
-  const rawProduct = product as any;
-
-  const breakdown =
-    rawProduct?.pricing?.breakdown ||
-    rawProduct?.pricingBreakdown ||
-    rawProduct?.breakdown ||
-    rawProduct?.priceBreakdown ||
-    [];
-
-  if (!Array.isArray(breakdown)) return [];
-
-  return breakdown
-    .map((row: any) => ({
-      label: normalizeBreakdownLabel(getBreakdownLabel(row)),
-      amount: getBreakdownAmount(row),
-    }))
-    .filter((row) => row.label && Number.isFinite(row.amount) && row.amount >= 0);
-}
-
-const REQUIRED_BREAKDOWN_ROWS = [
-  "Precio Productos USA",
-  "IVA importación (21%)",
-  "Flete Internacional",
-  "Aduana y Tasas",
-  "Gestión y Seguro ShopX",
-  "Logística Nacional",
-];
-
-function getCartBreakdown(items: CartItem[]) {
-  // Inicializamos todas las filas en cero para que la app muestre
-  // exactamente los mismos conceptos que la web, incluso cuando un concepto vale USD 0.
-  const totals: Record<string, number> = REQUIRED_BREAKDOWN_ROWS.reduce(
-    (acc, label) => {
-      acc[label] = 0;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
-
-  items.forEach((item) => {
-    const quantity = Number(item.quantity || 1);
-    const breakdown = getProductBreakdown(item.product);
-
-    breakdown.forEach((row) => {
-      const label = normalizeBreakdownLabel(row.label);
-      totals[label] = (totals[label] || 0) + Number(row.amount || 0) * quantity;
-    });
-  });
-
-  return REQUIRED_BREAKDOWN_ROWS.map((label) => ({
-    label,
-    amount: Number((totals[label] || 0).toFixed(2)),
-  }));
-}
-
-function getProductResolveKeys(product: ShopXProduct) {
-  const rawProduct = product as any;
-
-  return [
-    product.slug,
-    product._id,
-    product.id,
-    product.externalId,
-    rawProduct.sourceId,
-    rawProduct.sourceHandle,
-    product.sourceUrl,
-    product.title,
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-}
-
-function indexProductsByKeys(products: ShopXProduct[]) {
-  const index = new Map<string, ShopXProduct>();
-
-  products.forEach((product) => {
-    getProductResolveKeys(product).forEach((key) => {
-      index.set(normalizeText(key), product);
-    });
-  });
-
-  return index;
-}
-
-function mergeFreshProduct(item: CartItem, freshProduct: ShopXProduct): CartItem {
-  const itemProduct = item.product as any;
-  const fresh = freshProduct as any;
-
-  return {
-    ...item,
-    product: {
-      ...item.product,
-      ...freshProduct,
-      selectedOptions: fresh.selectedOptions || itemProduct.selectedOptions,
-      selectedVariant: fresh.selectedVariant || itemProduct.selectedVariant,
-      selectedVariantId: fresh.selectedVariantId || itemProduct.selectedVariantId,
-      pricing: fresh?.pricing || itemProduct?.pricing,
-    },
-  };
-}
-
-async function hydrateCartWithFreshPricing(
-  cartItems: CartItem[],
-  destination?: DomesticPricingDestination
-) {
-  if (!cartItems.length) return [];
-
-  const resolveKeys = Array.from(
-    new Set(
-      cartItems
-        .flatMap((item) => getProductResolveKeys(item.product))
-        .map((key) => key.trim())
-        .filter(Boolean)
-    )
-  );
-
-  let resolvedProducts: ShopXProduct[] = [];
-
-  try {
-    const selectedItemRequests = cartItems.map((item) => {
-      const rawProduct = item.product as any;
-      const key = getProductResolveKeys(item.product)[0];
-
-      return {
-        key,
-        selectedOptions: rawProduct.selectedOptions,
-        selectedVariantId: rawProduct.selectedVariantId || rawProduct.selectedVariant?.id,
-        quantity: Number(item.quantity || 1),
-      };
-    });
-
-    resolvedProducts = await resolveProductsForCartItems(
-      selectedItemRequests,
-      destination
-    );
-
-    if (resolvedProducts.length === cartItems.length) {
-      return cartItems.map((item, index) => mergeFreshProduct(item, resolvedProducts[index]));
-    }
-  } catch (error) {
-    console.log("ERROR RESOLVE SELECTED PRODUCTS FOR CART:", error);
-  }
-
-  try {
-    resolvedProducts = await resolveProductsBySlugs(resolveKeys, destination);
-  } catch (error) {
-    console.log("ERROR RESOLVE PRODUCTS FOR CART:", error);
-  }
-
-  const resolvedIndex = indexProductsByKeys(resolvedProducts);
-
-  const hydratedItems = await Promise.all(
-    cartItems.map(async (item) => {
-      const matchedProduct = getProductResolveKeys(item.product)
-        .map((key) => resolvedIndex.get(normalizeText(key)))
-        .find(Boolean);
-
-      if (matchedProduct) {
-        return mergeFreshProduct(item, matchedProduct);
-      }
-
-      if (item.product.slug) {
-        try {
-          const productBySlug = await getProductBySlug(item.product.slug, destination);
-
-          if (productBySlug) {
-            return mergeFreshProduct(item, productBySlug);
-          }
-        } catch (error) {
-          console.log("ERROR GET PRODUCT BY SLUG FOR CART:", error);
-        }
-      }
-
-      return item;
-    })
-  );
-
-  return hydratedItems;
-}
-
-function buildOrderItems(items: CartItem[]) {
-  return items.map((item) => {
-    const product = item.product as any;
-    const finalPriceUSD = getItemFinalPriceUSD(item);
-
-    return {
-      productId: getProductKey(item.product),
-      _id: product._id,
-      id: product.id,
-      slug: product.slug,
-      externalId: product.externalId,
-      title: product.title,
-      image: getProductImage(item.product),
-      quantity: Number(item.quantity || 1),
-      priceUSD: finalPriceUSD,
-      finalPriceUSD,
-      estimatedUSD: finalPriceUSD,
-      sourceUrl: product.sourceUrl,
-      url: product.sourceUrl,
-      brand: product.brand,
-      store: product.store,
-      source: product.source,
-      category: product.category,
-      pricing: product.pricing,
-      selectedOptions: product.selectedOptions,
-      selectedVariant: product.selectedVariant,
-      selectedVariantId: product.selectedVariantId || product.selectedVariant?.id,
-    };
-  });
 }
 
 function buildAddressText(user: ShopXUser) {
@@ -379,16 +100,16 @@ function buildAddressText(user: ShopXUser) {
 }
 
 function buildDomesticPricingDestination(
-  user?: ShopXUser | null
+  user?: ShopXUser | null,
 ): DomesticPricingDestination | undefined {
   if (!user) return undefined;
 
   const province = String(
-    user.address?.province || user.billing?.province || ""
+    user.address?.province || user.billing?.province || "",
   ).trim();
   const city = String(user.address?.city || user.billing?.city || "").trim();
   const postalCode = String(
-    user.address?.postalCode || user.billing?.postalCode || ""
+    user.address?.postalCode || user.billing?.postalCode || "",
   ).trim();
 
   if (!province && !city && !postalCode) return undefined;
@@ -397,6 +118,9 @@ function buildDomesticPricingDestination(
 }
 
 export default function CartScreen() {
+  const loadId = useRef(0);
+  const [preview, setPreview] = useState<CartPreview | null>(null);
+  const [pricingError, setPricingError] = useState("");
   const [items, setItems] = useState<CartItem[]>([]);
   const [user, setUser] = useState<ShopXUser | null>(null);
   const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
@@ -407,78 +131,80 @@ export default function CartScreen() {
   const [exchangeLoading, setExchangeLoading] = useState(false);
 
   async function loadCartAndSession() {
+    const id = ++loadId.current;
     setLoading(true);
-    setExchangeLoading(true);
-
+    setPricingError("");
+    setPreview(null);
     try {
-      const rate = await getExchangeRate();
-      setExchangeRate(rate);
-    } catch (error) {
-      console.log("ERROR EXCHANGE RATE:", error);
-      setExchangeRate(0);
-    } finally {
-      setExchangeLoading(false);
-    }
-
-    const [cartItems, storedUser] = await Promise.all([
-      getCartItems(),
-      getStoredUser(),
-    ]);
-
-    let nextUser = storedUser;
-
-    if (storedUser) {
-      try {
-        const account = await getAppAccount();
-        nextUser = account.user;
-        setProfileComplete(account.checkoutProfile.complete);
-        setMissingFields(account.checkoutProfile.missingFields || []);
-      } catch {
-        const freshUser = await fetchCurrentUser();
-        nextUser = freshUser;
-        setProfileComplete(null);
+      const [cartItems, storedUser] = await Promise.all([
+        getCartItems(),
+        getStoredUser(),
+      ]);
+      if (id !== loadId.current) return;
+      setItems(cartItems);
+      let nextUser = storedUser;
+      if (storedUser) {
+        try {
+          const account = await getAppAccount();
+          nextUser = account.user;
+          setProfileComplete(account.checkoutProfile.complete);
+          setMissingFields(account.checkoutProfile.missingFields || []);
+        } catch {
+          setProfileComplete(null);
+        }
+      } else {
+        setProfileComplete(false);
         setMissingFields([]);
       }
-    } else {
-      setProfileComplete(false);
-      setMissingFields([]);
+      if (id !== loadId.current) return;
+      setUser(nextUser);
+      if (cartItems.length) {
+        const result = await previewCart(
+          cartItems,
+          buildDomesticPricingDestination(nextUser),
+        );
+        if (id !== loadId.current) return;
+        setPreview(result);
+        setExchangeRate(result.exchangeRateUsed);
+      }
+    } catch (error) {
+      if (id !== loadId.current) return;
+      setPricingError(
+        error instanceof Error
+          ? error.message
+          : "No pudimos actualizar el carrito.",
+      );
+      setExchangeRate(0);
+    } finally {
+      if (id === loadId.current) {
+        setLoading(false);
+        setExchangeLoading(false);
+      }
     }
-
-    setUser(nextUser);
-
-    const hydratedItems = await hydrateCartWithFreshPricing(
-      cartItems,
-      buildDomesticPricingDestination(nextUser)
-    );
-
-    setItems(hydratedItems);
-    setLoading(false);
   }
 
   useFocusEffect(
     useCallback(() => {
       loadCartAndSession();
-    }, [])
+    }, []),
   );
 
-  const totalUSD = useMemo(() => {
-    return items.reduce((total, item) => {
-      return total + getItemFinalPriceUSD(item) * Number(item.quantity || 1);
-    }, 0);
-  }, [items]);
-
-  const totalARS = useMemo(() => {
-    if (!exchangeRate || exchangeRate <= 0) return 0;
-    return Math.round(totalUSD * exchangeRate);
-  }, [totalUSD, exchangeRate]);
-
-  const paymentBreakdown = useMemo(() => {
-    return getCartBreakdown(items);
-  }, [items]);
+  const totalUSD = preview?.totalUSD || 0;
+  const totalARS = preview?.totalARS || 0;
+  const paymentBreakdown = preview?.pricingBreakdown || [];
 
   async function handleQuantityChange(item: CartItem, nextQuantity: number) {
-    await updateCartItemQuantity(item.product, nextQuantity);
-    await loadCartAndSession();
+    try {
+      await updateCartItemQuantity(item.product, nextQuantity);
+      await loadCartAndSession();
+    } catch (error) {
+      Alert.alert(
+        "Cantidad",
+        error instanceof Error
+          ? error.message
+          : "No pudimos actualizar la cantidad.",
+      );
+    }
   }
 
   async function handleClearCart() {
@@ -493,6 +219,7 @@ export default function CartScreen() {
         onPress: async () => {
           await clearCart();
           setItems([]);
+          setPreview(null);
         },
       },
     ]);
@@ -506,10 +233,12 @@ export default function CartScreen() {
       return;
     }
 
-    if (!exchangeRate || exchangeRate <= 0) {
+    if (!preview?.checkoutEnabled || !exchangeRate || exchangeRate <= 0) {
       Alert.alert(
         "Cotización no disponible",
-        "No pudimos obtener el dólar tarjeta. Volvé a intentar en unos segundos."
+        preview?.reason ||
+          pricingError ||
+          "Necesitamos confirmar el precio final antes de continuar.",
       );
       return;
     }
@@ -521,7 +250,7 @@ export default function CartScreen() {
         [
           { text: "Cancelar", style: "cancel" },
           { text: "Ir a mi cuenta", onPress: () => router.push("/profile") },
-        ]
+        ],
       );
       return;
     }
@@ -547,8 +276,11 @@ export default function CartScreen() {
             : "Para comprar necesitamos tu teléfono y dirección de entrega.",
           [
             { text: "Cancelar", style: "cancel" },
-            { text: "Completar perfil", onPress: () => router.push("/profile") },
-          ]
+            {
+              text: "Completar perfil",
+              onPress: () => router.push("/profile"),
+            },
+          ],
         );
 
         return;
@@ -561,7 +293,9 @@ export default function CartScreen() {
         phone: checkoutUser.phone || "",
         dni: checkoutUser.dni || checkoutUser.billing?.dni || "",
         province:
-          checkoutUser.address?.province || checkoutUser.billing?.province || "",
+          checkoutUser.address?.province ||
+          checkoutUser.billing?.province ||
+          "",
         city: checkoutUser.address?.city || checkoutUser.billing?.city || "",
         address:
           buildAddressText(checkoutUser) || checkoutUser.billing?.address || "",
@@ -573,7 +307,9 @@ export default function CartScreen() {
 
       const destination = {
         province:
-          checkoutUser.address?.province || checkoutUser.billing?.province || "",
+          checkoutUser.address?.province ||
+          checkoutUser.billing?.province ||
+          "",
         city: checkoutUser.address?.city || checkoutUser.billing?.city || "",
         address:
           buildAddressText(checkoutUser) || checkoutUser.billing?.address || "",
@@ -600,14 +336,15 @@ export default function CartScreen() {
        * iniciaba Mercado Pago usando esa orden. Eso generaba órdenes pendientes
        * duplicadas y, además, el backend volvía a recalcular con otro pricing.
        *
-       * Ahora la app envía un snapshot exacto del carrito al endpoint de Mercado Pago.
+       * El servidor resuelve los productos y vuelve a calcular el importe antes de crear el pago.
        * El backend crea una CheckoutSession temporal, cobra ese mismo monto y recién
        * crea la Order real cuando el webhook confirma payment.status === "approved".
        */
       const checkoutResponse = await createMercadoPagoCheckout({
         buyer,
         destination,
-        items: buildOrderItems(items),
+        items: checkoutItems(items) as any,
+        expectedTotalARS: totalARS,
         totalUSD,
         totalARS,
         exchangeRateUsed: exchangeRate,
@@ -618,6 +355,15 @@ export default function CartScreen() {
         phone: checkoutUser.phone || "",
       });
 
+      if (checkoutResponse.totalARS !== totalARS) {
+        await loadCartAndSession();
+        Alert.alert(
+          "Precio actualizado",
+          "El importe cambió. Revisá el resumen antes de continuar.",
+        );
+        return;
+      }
+
       const checkoutUrl =
         checkoutResponse.init_point || checkoutResponse.sandbox_init_point;
 
@@ -625,22 +371,14 @@ export default function CartScreen() {
         throw new Error("Mercado Pago no devolvió un link de pago.");
       }
 
-      console.log("SHOPX MP CHECKOUT:", {
-        checkoutSessionId: checkoutResponse.checkoutSessionId,
-        totalUSD,
-        totalARS,
-        exchangeRateUsed: exchangeRate,
-        mpTotalARS: checkoutResponse.totalARS,
-      });
-
       await Linking.openURL(checkoutUrl);
     } catch (error: any) {
-      console.log("ERROR CHECKOUT CART:", error);
+      if (error?.message?.includes("importe cambió"))
+        await loadCartAndSession();
 
       Alert.alert(
         "No pudimos iniciar el pago",
-        error?.message ||
-          "Hubo un problema conectando con Mercado Pago."
+        error?.message || "Hubo un problema conectando con Mercado Pago.",
       );
     } finally {
       setCheckoutLoading(false);
@@ -738,10 +476,14 @@ export default function CartScreen() {
             </View>
 
             <View style={styles.itemsList}>
-              {items.map((item) => {
+              {items.map((item, index) => {
                 const imageUrl = getProductImage(item.product);
-                const price = getItemFinalPriceUSD(item);
-                const lineTotal = price * Number(item.quantity || 1);
+                const lineTotal =
+                  Number(
+                    preview?.items?.[index]?.priceUSD ||
+                      item.product.priceUSD ||
+                      0,
+                  ) * Number(item.quantity || 1);
 
                 return (
                   <View
@@ -772,18 +514,26 @@ export default function CartScreen() {
 
                       {getSelectedOptionsSummary(item.product).length > 0 ? (
                         <View style={styles.selectedOptionsWrap}>
-                          {getSelectedOptionsSummary(item.product).map((option) => (
-                            <Text key={option} style={styles.selectedOptionText} numberOfLines={1}>
-                              {option}
-                            </Text>
-                          ))}
+                          {getSelectedOptionsSummary(item.product).map(
+                            (option) => (
+                              <Text
+                                key={option}
+                                style={styles.selectedOptionText}
+                                numberOfLines={1}
+                              >
+                                {option}
+                              </Text>
+                            ),
+                          )}
                         </View>
                       ) : null}
 
-                      <Text style={styles.priceLabel}>FINAL ARGENTINA</Text>
+                      <Text style={styles.priceLabel}>PRECIO USA</Text>
 
                       <Text style={styles.price}>
-                        {price ? `USD ${formatUSD(lineTotal)}` : "Consultar"}
+                        {lineTotal
+                          ? `USD ${formatUSD(lineTotal)}`
+                          : "A confirmar"}
                       </Text>
 
                       <View style={styles.quantityRow}>
@@ -797,9 +547,7 @@ export default function CartScreen() {
                           <Feather name="minus" size={16} color={navy} />
                         </TouchableOpacity>
 
-                        <Text style={styles.quantityText}>
-                          {item.quantity}
-                        </Text>
+                        <Text style={styles.quantityText}>{item.quantity}</Text>
 
                         <TouchableOpacity
                           style={styles.quantityButton}
@@ -831,9 +579,7 @@ export default function CartScreen() {
                 <Text style={styles.destinationLabel}>Destino</Text>
                 <Text style={styles.destinationValue}>
                   {user
-                    ? user.address?.city ||
-                      user.billing?.city ||
-                      "A confirmar"
+                    ? user.address?.city || user.billing?.city || "A confirmar"
                     : "A confirmar"}
                 </Text>
               </View>
@@ -932,13 +678,14 @@ export default function CartScreen() {
                   </Text>
 
                   <Text style={styles.missingProfileText}>
-                    Necesitamos teléfono, CUIT de 11 dígitos y dirección de entrega.
-                    El DNI no es suficiente para el despacho.
+                    Necesitamos teléfono, CUIT de 11 dígitos y dirección de
+                    entrega. El DNI no es suficiente para el despacho.
                   </Text>
 
                   {missingFields.length > 0 ? (
                     <Text style={styles.missingProfileFields}>
-                      Faltan: {missingFields.map(getMissingFieldLabel).join(", ")}
+                      Faltan:{" "}
+                      {missingFields.map(getMissingFieldLabel).join(", ")}
                     </Text>
                   ) : null}
 
@@ -960,27 +707,15 @@ export default function CartScreen() {
 
               <View style={styles.resumeRows}>
                 {paymentBreakdown.length > 0 ? (
-                  paymentBreakdown.map((row) => (
-                    <View key={row.label} style={styles.resumeRow}>
-                      <Text style={styles.resumeLabel} numberOfLines={2}>
-                        {row.label}
-                      </Text>
-
-                      <Text style={styles.resumeAmount}>
-                        USD {formatUSD(row.amount)}
-                      </Text>
-                    </View>
-                  ))
+                  <PriceSummary rows={paymentBreakdown} />
                 ) : (
-                  <View style={styles.resumeWarningBox}>
-                    <Text style={styles.resumeWarningTitle}>
-                      Desglose no disponible
-                    </Text>
+                  <TouchableOpacity onPress={loadCartAndSession}>
                     <Text style={styles.resumeWarningText}>
-                      El producto tiene precio final, pero todavía no llegó el
-                      detalle de pricing.breakdown desde la API.
+                      {pricingError ||
+                        "Estamos confirmando el importe de tu compra."}{" "}
+                      Volver a calcular
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 )}
               </View>
 
@@ -1017,7 +752,11 @@ export default function CartScreen() {
                 ]}
                 activeOpacity={0.9}
                 onPress={handleCheckout}
-                disabled={checkoutLoading || exchangeRate <= 0}
+                disabled={
+                  checkoutLoading ||
+                  !preview?.checkoutEnabled ||
+                  exchangeRate <= 0
+                }
               >
                 {checkoutLoading ? (
                   <ActivityIndicator color={white} />
@@ -1026,37 +765,23 @@ export default function CartScreen() {
                     {!user
                       ? "Iniciar sesión para pagar"
                       : profileComplete === false
-                      ? "Completar datos para pagar"
-                      : exchangeRate <= 0
-                      ? "Cargando cotización..."
-                      : "Pagar con Mercado Pago"}
+                        ? "Completar datos para pagar"
+                        : exchangeRate <= 0
+                          ? "Cargando cotización..."
+                          : "Pagar con Mercado Pago"}
                   </Text>
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.reviewButton}
-                activeOpacity={0.9}
-                onPress={() =>
-                  Alert.alert(
-                    "Revisión solicitada",
-                    "ShopX puede revisar disponibilidad, peso real y categoría logística antes de avanzar."
-                  )
-                }
-              >
-                <Text style={styles.reviewButtonText}>
-                  Solicitar revisión antes de pagar
-                </Text>
-              </TouchableOpacity>
-                    {exchangeRate > 0 ? (
+              {exchangeRate > 0 ? (
                 <Text style={styles.resumeNote}>
-                  Cotización dólar tarjeta: ARS{" "}
-                  {exchangeRate.toLocaleString("es-AR")} · El pago se procesa
-                  en pesos argentinos mediante Mercado Pago.
+                  Tipo de cambio ShopX: ARS{" "}
+                  {exchangeRate.toLocaleString("es-AR")} · El pago se procesa en
+                  pesos argentinos mediante Mercado Pago.
                 </Text>
               ) : (
                 <Text style={styles.resumeNote}>
-                  No pudimos obtener la cotización del dólar tarjeta. Volvé a
+                  No pudimos confirmar el tipo de cambio vigente. Volvé a
                   intentar en unos segundos.
                 </Text>
               )}

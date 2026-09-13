@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { AppBottomNav } from "../../components/AppBottomNav";
-import { ScreenHeader } from "../../components/ScreenHeader";
+import { Feather } from "@expo/vector-icons";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,996 +12,504 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { getStoredUser } from "../../lib/auth";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppBottomNav } from "../../components/AppBottomNav";
+import { PriceSummary } from "../../components/PriceSummary";
+import { getStoredUser, ShopXUser } from "../../lib/auth";
+import { formatUSD } from "../../lib/api";
+import { addProductsToCart } from "../../lib/cart-store";
 import {
-  normalizeQuoteUrl,
-  submitQuoteRequest,
-  validateQuoteUrl,
-} from "../../lib/quote";
-
-const navy = "#062B4F";
-const navyDark = "#031A33";
-const text = "#071E35";
-const muted = "#718096";
-const accent = "#18C7D8";
-const soft = "#F7FAFC";
-const softCard = "#F1F5F9";
-const border = "#E2E8F0";
-const white = "#FFFFFF";
-const green = "#0EA371";
-const greenSoft = "#E7FFF4";
-const amber = "#F59E0B";
-
-const urgencyOptions = [
-  { value: "normal", label: "Normal", icon: "clock" as const },
-  { value: "urgent", label: "Lo necesito pronto", icon: "zap" as const },
-  { value: "not_sure", label: "Estoy evaluando", icon: "help-circle" as const },
-];
-
-function detectStoreFromUrl(value: string) {
-  const clean = value.toLowerCase();
-
-  if (clean.includes("amazon.")) return "Amazon";
-  if (clean.includes("apple.")) return "Apple";
-  if (clean.includes("nike.")) return "Nike";
-  if (clean.includes("ebay.")) return "eBay";
-  if (clean.includes("bestbuy.")) return "Best Buy";
-  if (clean.includes("yeti.")) return "YETI";
-  if (clean.includes("walmart.")) return "Walmart";
-  if (clean.includes("target.")) return "Target";
-  if (clean.includes("adidas.")) return "Adidas";
-
-  return "";
-}
+  basketCartProducts,
+  calculateQuoteBasket,
+  QuoteBasket,
+  quoteLinks,
+  supportsAutomaticQuote,
+  withQuantity,
+} from "../../lib/quote-basket";
+import { request } from "../../lib/request";
 
 export default function QuoteScreen() {
-  const [productUrl, setProductUrl] = useState("");
-  const [productName, setProductName] = useState("");
-  const [store, setStore] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [comments, setComments] = useState("");
-  const [contact, setContact] = useState("");
-  const [urgency, setUrgency] = useState<"normal" | "urgent" | "not_sure">(
-    "normal"
-  );
+  const params = useLocalSearchParams<{ url?: string }>();
+  const insets = useSafeAreaInsets();
+  const [input, setInput] = useState(params.url || "");
+  const [urls, setUrls] = useState<string[]>([]);
+  const [basket, setBasket] = useState<QuoteBasket>();
+  const [manual, setManual] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [title, setTitle] = useState("");
+  const [user, setUser] = useState<ShopXUser | null>(null);
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [quoteNumber, setQuoteNumber] = useState("");
-
-  useEffect(() => {
-    let mounted = true;
-
-    getStoredUser()
-      .then((user) => {
-        if (!mounted || !user) return;
-        setContact(user.email || user.phone || "");
-      })
-      .catch(() => null);
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const detected = detectStoreFromUrl(productUrl);
-    if (detected && !store.trim()) {
-      setStore(detected);
-    }
-  }, [productUrl, store]);
-
-  const urlError = useMemo(() => {
-    if (!productUrl.trim()) return "";
-    return validateQuoteUrl(productUrl);
-  }, [productUrl]);
-
-  const canSubmit = productUrl.trim() && contact.trim() && !urlError && !loading;
-
-  async function handleSubmit() {
-    const validationError = validateQuoteUrl(productUrl);
-
-    if (validationError) {
-      Alert.alert("Revisá el link", validationError);
-      return;
-    }
-
-    if (!contact.trim()) {
-      Alert.alert(
-        "Falta contacto",
-        "Dejanos tu email o teléfono para responderte la cotización."
-      );
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const data = await submitQuoteRequest({
-        productUrl: normalizeQuoteUrl(productUrl),
-        productName,
-        store,
-        quantity: Number(quantity || 1),
-        comments,
-        contact,
-        urgency,
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const busy = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      getStoredUser().then((value) => {
+        if (active) setUser(value);
       });
-
-      setQuoteNumber(data.quote?.quoteNumber || "");
-      setSubmitted(true);
-    } catch (error: any) {
-      Alert.alert(
-        "No pudimos enviar la cotización",
-        error?.message || "Probá de nuevo en unos segundos."
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+  useEffect(() => {
+    if (params.url) {
+      setInput(params.url);
+      setBasket(undefined);
+      setManual(false);
+      setSaved(false);
+    }
+  }, [params.url]);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
+  const expired =
+    !!basket?.expiresAt && new Date(basket.expiresAt).getTime() <= now;
+  async function calculate(nextUrls: string[]) {
+    if (busy.current) return;
+    if (!nextUrls.length) {
+      setBasket(undefined);
+      setUrls([]);
+      return;
+    }
+    busy.current = true;
+    setLoading(true);
+    setError("");
+    setBasket(undefined);
+    setSaved(false);
+    setUrls(nextUrls);
+    try {
+      const value = await calculateQuoteBasket(nextUrls, user?.address);
+      setBasket(value);
+      setNow(Date.now());
+      setInput("");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "No pudimos calcular el precio. Volvé a intentar.",
       );
     } finally {
+      busy.current = false;
       setLoading(false);
     }
   }
-
-  function resetForm() {
-    setProductUrl("");
-    setProductName("");
-    setStore("");
-    setQuantity("1");
-    setComments("");
-    setUrgency("normal");
-    setSubmitted(false);
-    setQuoteNumber("");
+  function submit() {
+    try {
+      const next = quoteLinks(input);
+      const combined = basket ? [...new Set([...urls, ...next])] : next;
+      if (combined.length > 5)
+        throw new Error("Podés sumar hasta cinco links por operación.");
+      if (combined.some((url) => !supportsAutomaticQuote(url))) {
+        setUrls(combined);
+        setManual(true);
+        setBasket(undefined);
+        setError("");
+        return;
+      }
+      setManual(false);
+      void calculate(combined);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Revisá los links.");
+    }
   }
-
-  return (
-    <KeyboardAvoidingView
-      style={styles.app}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+  async function sendManual() {
+    if (!user) {
+      router.push("/profile");
+      return;
+    }
+    if (busy.current) return;
+    busy.current = true;
+    setLoading(true);
+    setError("");
+    try {
+      await request("/api/quotes", {
+        method: "POST",
+        authenticated: true,
+        body: {
+          source: "app_quotes",
+          products: urls.map((sourceUrl) => ({
+            sourceUrl,
+            productTitle: title,
+            customerNotes: notes,
+            requestedQuantity: 1,
+          })),
+        },
+      });
+      setSaved(true);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "No pudimos guardar la solicitud.",
+      );
+    } finally {
+      busy.current = false;
+      setLoading(false);
+    }
+  }
+  async function addBasket() {
+    if (
+      !basket ||
+      loading ||
+      basket.errors?.length ||
+      basket.pricing.checkoutEnabled === false
+    )
+      return;
+    if (
+      basket.expiresAt &&
+      new Date(basket.expiresAt).getTime() <= Date.now()
+    ) {
+      setNow(Date.now());
+      return;
+    }
+    try {
+      await addProductsToCart(basketCartProducts(basket));
+      router.push("/cart");
+    } catch (e) {
+      Alert.alert(
+        "Revisá el carrito",
+        e instanceof Error ? e.message : "No pudimos agregar los productos.",
+      );
+    }
+  }
+  const button = (label: string, action: () => void, disabled = false) => (
+    <TouchableOpacity
+      style={[s.button, disabled && { opacity: 0.5 }]}
+      onPress={action}
+      disabled={disabled}
     >
+      <Text style={s.buttonText}>{label}</Text>
+      <Feather name="arrow-right" size={18} color="#062B4F" />
+    </TouchableOpacity>
+  );
+  return (
+    <View style={s.app}>
       <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          padding: 18,
+          paddingTop: insets.top + 20,
+          paddingBottom: insets.bottom + 120,
+          gap: 18,
+        }}
       >
-        <ScreenHeader
-          title="Cotizar"
-          subtitle="Pegá cualquier link de USA y recibí precio final estimado puesto en Argentina."
-          icon={<Feather name="link-2" size={24} color={white} />}
-        />
-
-        {submitted ? (
-          <View style={styles.successCard}>
-            <View style={styles.successIcon}>
-              <Feather name="check" size={34} color={green} />
-            </View>
-
-            <Text style={styles.successKicker}>Solicitud recibida</Text>
-            <Text style={styles.successTitle}>Ya la estamos revisando</Text>
-
-            <Text style={styles.successText}>
-              Vamos a validar disponibilidad, precio en origen, peso estimado,
-              impuestos, aduana y logística para responderte con un precio final
-              claro.
+        <View style={s.header}>
+          <Text style={s.title}>Cotizá tu producto de USA.</Text>
+          <Text style={s.subtitle}>
+            Pegá el link una sola vez. Conocé producto, impuestos y envío antes
+            de pagar.
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={s.history}
+          onPress={() => router.push("/quotes")}
+        >
+          <Feather name="file-text" size={20} color="#062B4F" />
+          <Text style={s.heading}>Mis cotizaciones</Text>
+          <Feather name="chevron-right" size={20} color="#062B4F" />
+        </TouchableOpacity>
+        {saved ? (
+          <View style={s.card}>
+            <Feather name="check-circle" size={36} color="#07865F" />
+            <Text style={s.heading}>Solicitud recibida</Text>
+            <Text style={s.text}>
+              Podés seguir la respuesta y pagar desde Mis cotizaciones.
             </Text>
-
-            <View style={styles.successSummary}>
-              {!!quoteNumber && (
-                <>
-                  <View>
-                    <Text style={styles.summaryLabel}>Número de solicitud</Text>
-                    <Text style={styles.summaryValue}>{quoteNumber}</Text>
-                  </View>
-                  <View style={styles.summaryDivider} />
-                </>
-              )}
-
-              <View>
-                <Text style={styles.summaryLabel}>Link</Text>
-                <Text style={styles.summaryValue} numberOfLines={2}>
-                  {productUrl}
-                </Text>
-              </View>
-
-              <View style={styles.summaryDivider} />
-
-              <View>
-                <Text style={styles.summaryLabel}>Contacto</Text>
-                <Text style={styles.summaryValue} numberOfLines={2}>
-                  {contact}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.nextStepsCard}>
-              <Text style={styles.nextStepsTitle}>Qué pasa ahora</Text>
-              <View style={styles.nextStepRow}>
-                <View style={styles.nextStepDot} />
-                <Text style={styles.nextStepText}>Revisamos el producto y disponibilidad.</Text>
-              </View>
-              <View style={styles.nextStepRow}>
-                <View style={styles.nextStepDotMuted} />
-                <Text style={styles.nextStepText}>Calculamos precio final Argentina.</Text>
-              </View>
-              <View style={styles.nextStepRow}>
-                <View style={styles.nextStepDotMuted} />
-                <Text style={styles.nextStepText}>Te respondemos con próximos pasos.</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={resetForm}>
-              <Text style={styles.primaryButtonText}>Cotizar otro producto</Text>
-            </TouchableOpacity>
+            {button("Ver mis cotizaciones", () => router.push("/quotes"))}
+            {button("Cotizar otro producto", () => {
+              setSaved(false);
+              setManual(false);
+              setInput("");
+              setUrls([]);
+            })}
           </View>
         ) : (
           <>
-            <View style={styles.heroCard}>
-              <View style={styles.heroTextBlock}>
-                <Text style={styles.heroKicker}>SHOPX LINK REQUEST</Text>
-                <Text style={styles.heroTitle}>Traé cualquier producto de USA</Text>
-                <Text style={styles.heroText}>
-                  Pegá el link. ShopX analiza la compra y te devuelve un precio
-                  final estimado para recibirlo en Argentina.
-                </Text>
-              </View>
-
-              <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>USA</Text>
-                <Text style={styles.heroBadgeSub}>AR</Text>
-              </View>
-            </View>
-
-            <View style={styles.flowCard}>
-              <View style={styles.flowItem}>
-                <View style={styles.flowIcon}>
-                  <Text style={styles.flowNumber}>1</Text>
-                </View>
-                <Text style={styles.flowText}>Pegás el link</Text>
-              </View>
-              <View style={styles.flowLine} />
-              <View style={styles.flowItem}>
-                <View style={styles.flowIcon}>
-                  <Text style={styles.flowNumber}>2</Text>
-                </View>
-                <Text style={styles.flowText}>Calculamos final</Text>
-              </View>
-              <View style={styles.flowLine} />
-              <View style={styles.flowItem}>
-                <View style={styles.flowIcon}>
-                  <Text style={styles.flowNumber}>3</Text>
-                </View>
-                <Text style={styles.flowText}>Te respondemos</Text>
-              </View>
-            </View>
-
-            <View style={styles.mainCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="link-2" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Link del producto</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Copiá la URL completa de la tienda de USA
-                  </Text>
-                </View>
-              </View>
-
+            <View style={s.card}>
+              <Text style={s.heading}>
+                {basket ? "Sumá otro producto" : "Link del producto"}
+              </Text>
               <TextInput
-                value={productUrl}
-                onChangeText={setProductUrl}
-                placeholder="https://www.amazon.com/..."
-                placeholderTextColor="#8FA0B6"
-                style={[styles.linkInput, urlError ? styles.inputError : null]}
+                accessibilityLabel="Links de productos de USA"
                 multiline
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="url"
+                value={input}
+                onChangeText={setInput}
+                editable={!loading}
+                placeholder="Pegá uno o varios links de tiendas de USA"
+                style={s.input}
               />
-
-              {!!urlError && <Text style={styles.errorText}>{urlError}</Text>}
-
-              <Text style={styles.helperText}>
-                Puede ser Amazon, Apple, Nike, eBay, Best Buy, StockX, YETI o
-                cualquier tienda de USA.
+              {button("Cotizar", submit, loading || !input.trim())}
+              <Text style={s.text}>
+                Automático: Amazon, eBay, Walmart, Target, Best Buy, Sephora,
+                Newegg, Abercrombie y Hollister. Hasta cinco links de dos
+                tiendas.
               </Text>
             </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="shopping-bag" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Datos útiles opcionales</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    La tienda, el modelo y los comentarios no son obligatorios.
-                  </Text>
-                </View>
+            {loading && (
+              <View style={s.card}>
+                <ActivityIndicator color="#062B4F" />
+                <Text style={s.heading}>Estamos calculando tu compra</Text>
+                <Text style={s.text}>
+                  Revisamos precio, disponibilidad y datos de envío. Algunas
+                  tiendas pueden tardar unos minutos.
+                </Text>
               </View>
-
-              <TextInput
-                value={productName}
-                onChangeText={setProductName}
-                placeholder="Nombre/modelo del producto"
-                placeholderTextColor="#8FA0B6"
-                style={styles.contactInput}
-              />
-
-              <View style={styles.rowInputs}>
+            )}
+            {!!error && (
+              <View style={s.card}>
+                <Text style={s.error}>{error}</Text>
+                {urls.length > 0 &&
+                  !manual &&
+                  button("Volver a calcular", () => calculate(urls), loading)}
+              </View>
+            )}
+            {manual && !loading && (
+              <View style={s.card}>
+                <Text style={s.heading}>Completá los datos del producto</Text>
+                <Text style={s.text}>
+                  Para esta tienda necesitamos revisar la información.
+                  Conservamos tus links.
+                </Text>
+                {urls.map((url) => (
+                  <Text key={url} numberOfLines={2} style={s.text}>
+                    {url}
+                  </Text>
+                ))}
                 <TextInput
-                  value={store}
-                  onChangeText={setStore}
-                  placeholder="Tienda (opcional)"
-                  placeholderTextColor="#8FA0B6"
-                  style={[styles.smallInput, { flex: 1.45 }]}
+                  accessibilityLabel="Producto o modelo"
+                  value={title}
+                  onChangeText={setTitle}
+                  placeholder="Producto o modelo (opcional)"
+                  style={s.input}
                 />
                 <TextInput
-                  value={quantity}
-                  onChangeText={setQuantity}
-                  placeholder="Cant."
-                  placeholderTextColor="#8FA0B6"
-                  style={[styles.smallInput, { flex: 0.55 }]}
-                  keyboardType="number-pad"
+                  accessibilityLabel="Talle, color y comentarios"
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Talle, color, cantidad y comentarios"
+                  multiline
+                  style={s.input}
                 />
+                {button(
+                  user ? "Enviar solicitud" : "Iniciar sesión para solicitar",
+                  sendManual,
+                  loading,
+                )}
               </View>
-
-              <Text style={styles.optionalHint}>
-                Si no sabés la tienda, dejalo vacío. Con el link alcanza para pedir la cotización.
-              </Text>
-            </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="message-square" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Comentarios</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Talle, color, modelo exacto o urgencia
-                  </Text>
-                </View>
-              </View>
-
-              <TextInput
-                value={comments}
-                onChangeText={setComments}
-                placeholder="Ej: talle M, color negro, versión 256GB, envío sin apuro..."
-                placeholderTextColor="#8FA0B6"
-                style={styles.commentsInput}
-                multiline
-              />
-            </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="user" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Contacto</Text>
-                  <Text style={styles.sectionSubtitle}>Dónde te respondemos</Text>
-                </View>
-              </View>
-
-              <TextInput
-                value={contact}
-                onChangeText={setContact}
-                placeholder="Email o teléfono"
-                placeholderTextColor="#8FA0B6"
-                style={styles.contactInput}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-
-            <View style={styles.sectionCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Feather name="clock" size={20} color={navy} />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Prioridad</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Ayuda a ordenar la respuesta
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.urgencyGrid}>
-                {urgencyOptions.map((option) => {
-                  const active = option.value === urgency;
-                  return (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={[styles.urgencyChip, active && styles.urgencyChipActive]}
-                      onPress={() => setUrgency(option.value as any)}
-                    >
-                      <Feather
-                        name={option.icon}
-                        size={15}
-                        color={active ? white : navy}
-                      />
-                      <Text
-                        style={[
-                          styles.urgencyText,
-                          active && styles.urgencyTextActive,
-                        ]}
+            )}
+            {basket && (
+              <>
+                {basket.products.map((product, index) => (
+                  <View style={s.card} key={product.id}>
+                    <View style={s.row}>
+                      {!!product.imageUrl && (
+                        <Image
+                          source={{ uri: product.imageUrl }}
+                          style={s.image}
+                        />
+                      )}
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <Text style={s.store}>{product.store}</Text>
+                        <Text style={s.heading}>{product.title}</Text>
+                        <Text style={s.text}>
+                          {[product.selectedColor, product.selectedSize]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </Text>
+                        <Text style={s.text}>
+                          Precio USA: USD {formatUSD(product.priceUSD)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={s.row}>
+                      <TouchableOpacity
+                        accessibilityLabel={`Quitar una unidad de ${product.title}`}
+                        disabled={
+                          loading ||
+                          !!basket.errors?.length ||
+                          Number(product.quantity || 1) <= 1
+                        }
+                        onPress={() =>
+                          calculate(
+                            urls.map((url, i) =>
+                              i === index
+                                ? withQuantity(
+                                    url,
+                                    Number(product.quantity || 1) - 1,
+                                  )
+                                : url,
+                            ),
+                          )
+                        }
                       >
-                        {option.label}
+                        <Text style={s.control}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={s.heading}>{product.quantity || 1}</Text>
+                      <TouchableOpacity
+                        accessibilityLabel={`Sumar una unidad de ${product.title}`}
+                        disabled={
+                          loading ||
+                          !!basket.errors?.length ||
+                          Number(product.quantity || 1) >= 3
+                        }
+                        onPress={() =>
+                          calculate(
+                            urls.map((url, i) =>
+                              i === index
+                                ? withQuantity(
+                                    url,
+                                    Number(product.quantity || 1) + 1,
+                                  )
+                                : url,
+                            ),
+                          )
+                        }
+                      >
+                        <Text style={s.control}>+</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{ marginLeft: "auto" }}
+                        disabled={loading || !!basket.errors?.length}
+                        onPress={() =>
+                          calculate(urls.filter((_, i) => i !== index))
+                        }
+                      >
+                        <Text style={s.error}>Quitar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+                {!!basket.errors?.length && (
+                  <View style={s.card}>
+                    {basket.errors.map((item) => (
+                      <Text key={item.url} style={s.error}>
+                        {item.error}
                       </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.trustCard}>
-              <View style={styles.trustHeader}>
-                <View style={styles.trustIconBig}>
-                  <MaterialCommunityIcons
-                    name="shield-check-outline"
-                    size={25}
-                    color={white}
-                  />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.trustTitle}>Qué incluye la cotización</Text>
-                  <Text style={styles.trustSubtitle}>
-                    Pensado para evitar sorpresas antes de comprar.
+                    ))}
+                    <Text style={s.text}>
+                      Revisá los enlaces que no se pudieron calcular antes de
+                      continuar.
+                    </Text>
+                    {button(
+                      "Reintentar cotización completa",
+                      () => calculate(urls),
+                      loading,
+                    )}
+                  </View>
+                )}
+                <View style={s.card}>
+                  <Text style={s.heading}>Resumen de la compra</Text>
+                  <PriceSummary rows={basket.pricing.breakdown || []} />
+                  <Text style={s.total}>
+                    USD {formatUSD(basket.pricing.totalFinal)}
                   </Text>
+                  <Text style={s.text}>
+                    Total estimado puesto en Argentina. El carrito vuelve a
+                    confirmar el importe con tu dirección.
+                  </Text>
+                  {basket.warnings?.map((warning) => (
+                    <Text style={s.text} key={warning}>
+                      {warning}
+                    </Text>
+                  ))}
+                  {expired
+                    ? button(
+                        "Actualizar cotización vencida",
+                        () => calculate(urls),
+                        loading,
+                      )
+                    : button(
+                        "Continuar al carrito",
+                        addBasket,
+                        loading ||
+                          !!basket.errors?.length ||
+                          !basket.cartItems?.length ||
+                          basket.pricing.checkoutEnabled === false,
+                      )}
+                  {!!basket.pricing.reason && (
+                    <Text style={s.error}>{basket.pricing.reason}</Text>
+                  )}
                 </View>
-              </View>
-
-              <View style={styles.trustList}>
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Precio final estimado en Argentina</Text>
-                </View>
-
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Producto, impuestos, aduana y tasas</Text>
-                </View>
-
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Logística internacional y entrega local</Text>
-                </View>
-
-                <View style={styles.trustItem}>
-                  <Feather name="check-circle" size={18} color={accent} />
-                  <Text style={styles.trustText}>Acompañamiento ShopX hasta la entrega</Text>
-                </View>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
-              onPress={handleSubmit}
-              disabled={!canSubmit}
-            >
-              {loading ? (
-                <ActivityIndicator color={white} />
-              ) : (
-                <>
-                  <Text style={styles.submitButtonText}>Solicitar cotización</Text>
-                  <Feather name="arrow-right" size={20} color={white} />
-                </>
-              )}
-            </TouchableOpacity>
-
-            <Text style={styles.legalText}>
-              La cotización puede variar según disponibilidad, precio en origen,
-              peso, medidas y condiciones logísticas al momento de la compra.
-            </Text>
+              </>
+            )}
           </>
         )}
-
-        <View style={{ height: 130 }} />
+        <Text style={s.text}>
+          Pagá con tarjeta y cuotas mediante Mercado Pago. Las cuotas y su costo
+          dependen del medio seleccionado y se muestran al pagar.
+        </Text>
       </ScrollView>
-
       <AppBottomNav />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  app: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-  content: {
-    paddingHorizontal: 18,
-    paddingBottom: 0,
-  },
-
-  heroCard: {
-    borderRadius: 30,
-    backgroundColor: navyDark,
-    padding: 18,
-    marginBottom: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  heroTextBlock: {
-    flex: 1,
-  },
-  heroKicker: {
-    color: accent,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-  },
-  heroTitle: {
-    color: white,
-    fontSize: 23,
-    fontWeight: "900",
-    marginTop: 6,
-    letterSpacing: -0.8,
-    lineHeight: 28,
-  },
-  heroText: {
-    color: "rgba(255,255,255,0.74)",
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-    marginTop: 7,
-  },
-  heroBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-  },
-  heroBadgeText: {
-    color: white,
-    fontSize: 17,
-    fontWeight: "900",
-    letterSpacing: -0.4,
-  },
-  heroBadgeSub: {
-    color: accent,
-    fontSize: 11,
-    fontWeight: "900",
-    marginTop: -2,
-  },
-
-  flowCard: {
-    borderRadius: 24,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 14,
-    marginBottom: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.035,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 1,
-  },
-  flowItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-  flowIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 6,
-  },
-  flowNumber: {
-    color: navy,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  flowText: {
-    color: text,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  flowLine: {
-    width: 18,
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: "#DCE7F2",
-    marginHorizontal: 2,
-  },
-
-  mainCard: {
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: white,
-    padding: 16,
-    marginBottom: 14,
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
-  sectionCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: white,
-    padding: 16,
-    marginBottom: 14,
-    shadowColor: navy,
-    shadowOpacity: 0.035,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 1,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 14,
-  },
-  cardIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sectionTitle: {
-    color: text,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  sectionSubtitle: {
-    color: muted,
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 3,
-  },
-
-  linkInput: {
-    minHeight: 108,
-    borderRadius: 20,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: text,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlignVertical: "top",
-    fontWeight: "600",
-  },
-  inputError: {
-    borderColor: "#EF4444",
-    backgroundColor: "#FFF7F7",
-  },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "800",
-    marginTop: 9,
-  },
-  commentsInput: {
-    minHeight: 116,
-    borderRadius: 20,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: text,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlignVertical: "top",
-    fontWeight: "600",
-  },
-  contactInput: {
-    minHeight: 52,
-    borderRadius: 18,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    color: text,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  rowInputs: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 10,
-  },
-  smallInput: {
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    paddingHorizontal: 16,
-    color: text,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  helperText: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 11,
-    fontWeight: "600",
-  },
-  optionalHint: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
-    fontWeight: "600",
-  },
-  urgencyGrid: {
-    gap: 9,
-  },
-  urgencyChip: {
-    minHeight: 48,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: softCard,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 9,
-  },
-  urgencyChipActive: {
-    backgroundColor: navy,
-    borderColor: navy,
-  },
-  urgencyText: {
-    color: text,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  urgencyTextActive: {
-    color: white,
-  },
-
-  trustCard: {
-    borderRadius: 28,
-    backgroundColor: navy,
-    padding: 18,
-    marginBottom: 18,
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  trustHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
-  },
-  trustIconBig: {
-    width: 48,
-    height: 48,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  trustTitle: {
-    color: white,
-    fontSize: 19,
-    lineHeight: 24,
-    fontWeight: "900",
-  },
-  trustSubtitle: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 3,
-  },
-  trustList: {
-    gap: 12,
-  },
-  trustItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  trustText: {
-    flex: 1,
-    color: "#D7E2EF",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-  },
-
-  submitButton: {
-    backgroundColor: navy,
-    borderRadius: 999,
-    minHeight: 56,
-    paddingHorizontal: 18,
-    paddingVertical: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 9,
-    marginBottom: 14,
-    shadowColor: navy,
-    shadowOpacity: 0.13,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 4,
-  },
-  submitButtonDisabled: {
-    opacity: 0.48,
-  },
-  submitButtonText: {
-    color: white,
-    fontSize: 16,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  legalText: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 19,
-    textAlign: "center",
-    paddingHorizontal: 8,
-    fontWeight: "500",
-  },
-
-  successCard: {
-    borderRadius: 30,
-    backgroundColor: navy,
+const s = StyleSheet.create({
+  app: { flex: 1, backgroundColor: "#F7FAFC" },
+  header: {
     padding: 22,
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    backgroundColor: "#062B4F",
+    borderRadius: 24,
+    gap: 12,
   },
-  successIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: greenSoft,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  successKicker: {
-    color: accent,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-    marginBottom: 6,
-  },
-  successTitle: {
-    color: white,
-    fontSize: 27,
-    lineHeight: 33,
-    fontWeight: "900",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  successText: {
-    color: "#D7E2EF",
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-    marginBottom: 20,
-    fontWeight: "600",
-  },
-  successSummary: {
-    width: "100%",
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+  title: { color: "#FFF", fontWeight: "900", fontSize: 31, lineHeight: 36 },
+  subtitle: { color: "#D6E8F2", fontSize: 15, lineHeight: 23 },
+  card: {
     padding: 18,
-    marginBottom: 14,
-  },
-  summaryLabel: {
-    color: "#9FB1C8",
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-    marginBottom: 5,
-    textTransform: "uppercase",
-  },
-  summaryValue: {
-    color: white,
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: "900",
-  },
-  summaryDivider: {
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    marginVertical: 14,
-  },
-  nextStepsCard: {
-    width: "100%",
-    borderRadius: 22,
-    backgroundColor: "rgba(24,199,216,0.11)",
     borderWidth: 1,
-    borderColor: "rgba(24,199,216,0.22)",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    gap: 14,
+  },
+  heading: { color: "#062B4F", fontWeight: "800", fontSize: 17, flexShrink: 1 },
+  text: { color: "#617590", fontSize: 13, lineHeight: 20 },
+  input: {
+    backgroundColor: "#F3F6FA",
+    color: "#062B4F",
+    padding: 14,
+    borderRadius: 12,
+    minHeight: 50,
+  },
+  button: {
+    backgroundColor: "#22D3EE",
+    borderRadius: 14,
     padding: 16,
-    marginBottom: 16,
-  },
-  nextStepsTitle: {
-    color: white,
-    fontSize: 15,
-    fontWeight: "900",
-    marginBottom: 11,
-  },
-  nextStepRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 9,
-  },
-  nextStepDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: accent,
-  },
-  nextStepDotMuted: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: "rgba(255,255,255,0.32)",
-  },
-  nextStepText: {
-    flex: 1,
-    color: "#D7E2EF",
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  primaryButton: {
-    width: "100%",
-    backgroundColor: white,
-    borderRadius: 999,
-    paddingVertical: 16,
+    justifyContent: "space-between",
+    gap: 8,
     alignItems: "center",
   },
-  primaryButtonText: {
-    color: navy,
+  buttonText: {
+    color: "#062B4F",
+    fontWeight: "800",
     fontSize: 15,
-    fontWeight: "900",
+    flexShrink: 1,
   },
+  error: { color: "#B42318", fontSize: 13, lineHeight: 20 },
+  history: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "center",
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 16,
+  },
+  image: { width: 90, height: 100, resizeMode: "contain" },
+  row: { flexDirection: "row", gap: 16, alignItems: "center" },
+  store: { color: "#087F91", fontSize: 11, fontWeight: "800" },
+  control: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "#EAFBFD",
+    fontSize: 22,
+    color: "#062B4F",
+  },
+  total: { fontSize: 29, fontWeight: "900", color: "#062B4F" },
 });
