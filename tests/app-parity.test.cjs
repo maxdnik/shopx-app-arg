@@ -4,6 +4,36 @@ const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
 
+test("Native Google sign-in uses the SDK ID token and handles cancellation", async () => {
+  let configuration;
+  let result = { type: "success", data: { idToken: "synthetic-id-token" } };
+  const native = load("lib/google-native.ts", {
+    "./google-auth-config": {
+      GOOGLE_AUTH_CONFIG: {
+        webClientId: "web-client",
+        iosClientId: "ios-client",
+      },
+    },
+    "@react-native-google-signin/google-signin": {
+      GoogleSignin: {
+        configure: (config) => {
+          configuration = config;
+        },
+        hasPlayServices: async () => true,
+        signIn: async () => result,
+      },
+      isErrorWithCode: () => false,
+      statusCodes: {},
+    },
+  });
+  assert.equal(await native.getNativeGoogleIdToken(), "synthetic-id-token");
+  assert.equal(configuration.webClientId, "web-client");
+  result = { type: "cancelled" };
+  assert.equal(await native.getNativeGoogleIdToken(), null);
+  result = { type: "success", data: {} };
+  await assert.rejects(native.getNativeGoogleIdToken(), /sesión válida/);
+});
+
 // Execute the actual portable app modules; only device storage/network are replaced.
 function load(relative, mocks = {}, cache = new Map()) {
   const filename = path.resolve(__dirname, "..", relative);

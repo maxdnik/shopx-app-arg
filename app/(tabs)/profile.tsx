@@ -1,5 +1,9 @@
 import { router, useFocusEffect } from "expo-router";
 import * as AuthSession from "expo-auth-session";
+import {
+  getNativeGoogleIdToken,
+  clearNativeGoogleSession,
+} from "../../lib/google-native";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -114,13 +118,13 @@ function getMissingLabel(field: string) {
   return labels[field] || field;
 }
 
-
 function normalizeOrderStatus(order: AppOrder) {
   const status = String(order.status || "").toLowerCase();
   const paymentStatus = String(order.paymentStatus || "").toLowerCase();
   const trackingStep = String(order.tracking?.currentStep || "").toLowerCase();
 
-  if (trackingStep === "delivered" || status === "delivered") return "delivered";
+  if (trackingStep === "delivered" || status === "delivered")
+    return "delivered";
 
   if (
     trackingStep === "cancelled" ||
@@ -148,7 +152,7 @@ function getOrderStats(orders: AppOrder[]) {
 
       return acc;
     },
-    { total: 0, active: 0, delivered: 0 }
+    { total: 0, active: 0, delivered: 0 },
   );
 }
 
@@ -188,7 +192,11 @@ function MenuRow({ item }: { item: MenuItem }) {
       onPress={item.action}
     >
       <View style={styles.menuIcon}>
-        <MaterialCommunityIcons name={item.icon as any} size={23} color={navy} />
+        <MaterialCommunityIcons
+          name={item.icon as any}
+          size={23}
+          color={navy}
+        />
       </View>
 
       <View style={styles.menuTextBlock}>
@@ -263,17 +271,17 @@ export default function ProfileScreen() {
     setFormPhone(nextUser.phone || "");
     setFormDni(nextUser.dni || nextUser.billing?.dni || "");
     setFormStreetName(
-      nextUser.address?.streetName || nextUser.address?.street || ""
+      nextUser.address?.streetName || nextUser.address?.street || "",
     );
     setFormStreetNumber(nextUser.address?.streetNumber || "");
     setFormFloor(nextUser.address?.floor || "");
     setFormApartment(nextUser.address?.apartment || "");
     setFormCity(nextUser.address?.city || nextUser.billing?.city || "");
     setFormProvince(
-      nextUser.address?.province || nextUser.billing?.province || ""
+      nextUser.address?.province || nextUser.billing?.province || "",
     );
     setFormPostalCode(
-      nextUser.address?.postalCode || nextUser.billing?.postalCode || ""
+      nextUser.address?.postalCode || nextUser.billing?.postalCode || "",
     );
   }
 
@@ -291,7 +299,6 @@ export default function ProfileScreen() {
       // Login succeeded; account endpoint can be retried later.
     }
   }
-
 
   async function loadProfileOrders(nextUser?: ShopXUser | null) {
     const targetUser = nextUser || user;
@@ -322,7 +329,7 @@ export default function ProfileScreen() {
     if (!email) {
       Alert.alert(
         "Ingresá tu email",
-        "Escribí el email de tu cuenta y después tocá ‘Olvidé mi contraseña’."
+        "Escribí el email de tu cuenta y después tocá ‘Olvidé mi contraseña’.",
       );
       return;
     }
@@ -332,12 +339,12 @@ export default function ProfileScreen() {
       await forgotPasswordApp(email);
       Alert.alert(
         "Revisá tu email",
-        "Si existe una cuenta ShopX con ese email, te enviamos un link para restablecer tu contraseña."
+        "Si existe una cuenta ShopX con ese email, te enviamos un link para restablecer tu contraseña.",
       );
     } catch (error: any) {
       Alert.alert(
         "No pudimos enviar el email",
-        error?.message || "Intentá nuevamente en unos minutos."
+        error?.message || "Intentá nuevamente en unos minutos.",
       );
     } finally {
       setSubmitting(false);
@@ -363,7 +370,7 @@ export default function ProfileScreen() {
         setGoogleLoading(false);
         Alert.alert(
           "Google no devolvió sesión",
-          "No pudimos obtener el token de Google. Intentá nuevamente."
+          "No pudimos obtener el token de Google. Intentá nuevamente.",
         );
         return;
       }
@@ -372,14 +379,11 @@ export default function ProfileScreen() {
         const loggedUser = await loginWithGoogleApp({ idToken });
         await hydrateAccountAfterAuth(loggedUser);
 
-        Alert.alert(
-          "Sesión iniciada",
-          "Ya podés comprar con tu cuenta ShopX."
-        );
+        Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
       } catch (error: any) {
         Alert.alert(
           "No pudimos iniciar sesión con Google",
-          error?.message || "Intentá nuevamente."
+          error?.message || "Intentá nuevamente.",
         );
       } finally {
         setGoogleLoading(false);
@@ -411,7 +415,7 @@ export default function ProfileScreen() {
   function handleOpenPaymentMethods() {
     Alert.alert(
       "Métodos de pago",
-      "Por ahora los pagos se procesan de forma segura mediante Mercado Pago. ShopX no guarda tarjetas ni datos financieros en la app."
+      "Por ahora los pagos se procesan de forma segura mediante Mercado Pago. ShopX no guarda tarjetas ni datos financieros en la app.",
     );
   }
 
@@ -429,7 +433,7 @@ export default function ProfileScreen() {
     } catch {
       Alert.alert(
         "Términos y condiciones",
-        "No pudimos abrir el enlace. Podés consultarlos desde la web de ShopX."
+        "No pudimos abrir el enlace. Podés consultarlos desde la web de ShopX.",
       );
     }
   }
@@ -478,7 +482,7 @@ export default function ProfileScreen() {
 
       Alert.alert(
         "No pudimos iniciar sesión con Apple",
-        error?.message || "Intentá nuevamente."
+        error?.message || "Intentá nuevamente.",
       );
     } finally {
       setAppleLoading(false);
@@ -491,19 +495,32 @@ export default function ProfileScreen() {
     if (!GOOGLE_AUTH_CONFIG.webClientId) {
       Alert.alert(
         "Google no configurado",
-        "Falta EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID en la app."
+        "Falta EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID en la app.",
       );
       return;
     }
 
     try {
       setGoogleLoading(true);
-      await promptGoogleAsync();
+      if (Platform.OS === "web") {
+        await promptGoogleAsync();
+      } else {
+        const idToken = await getNativeGoogleIdToken();
+        if (idToken) {
+          const loggedUser = await loginWithGoogleApp({ idToken });
+          await hydrateAccountAfterAuth(loggedUser);
+          Alert.alert(
+            "Sesión iniciada",
+            "Ya podés comprar con tu cuenta ShopX.",
+          );
+        }
+        setGoogleLoading(false);
+      }
     } catch (error: any) {
       setGoogleLoading(false);
       Alert.alert(
         "No pudimos abrir Google",
-        error?.message || "Intentá nuevamente."
+        error?.message || "Intentá nuevamente.",
       );
     }
   }
@@ -603,7 +620,7 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       loadSession();
-    }, [])
+    }, []),
   );
 
   async function handleLogin() {
@@ -629,7 +646,7 @@ export default function ProfileScreen() {
     } catch (error: any) {
       Alert.alert(
         "No pudimos iniciar sesión",
-        error?.message || "Revisá los datos e intentá nuevamente."
+        error?.message || "Revisá los datos e intentá nuevamente.",
       );
     } finally {
       setSubmitting(false);
@@ -652,7 +669,7 @@ export default function ProfileScreen() {
     if (!registerPassword || registerPassword.length < 8) {
       Alert.alert(
         "Contraseña inválida",
-        "La contraseña debe tener al menos 8 caracteres."
+        "La contraseña debe tener al menos 8 caracteres.",
       );
       return;
     }
@@ -674,7 +691,7 @@ export default function ProfileScreen() {
     } catch (error: any) {
       Alert.alert(
         "No pudimos crear la cuenta",
-        error?.message || "Probá con otro email o intentá nuevamente."
+        error?.message || "Probá con otro email o intentá nuevamente.",
       );
     } finally {
       setSubmitting(false);
@@ -708,7 +725,7 @@ export default function ProfileScreen() {
     ) {
       Alert.alert(
         "Falta dirección",
-        "Completá calle, número, ciudad, provincia y código postal."
+        "Completá calle, número, ciudad, provincia y código postal.",
       );
       return;
     }
@@ -733,9 +750,7 @@ export default function ProfileScreen() {
         billing: {
           fullName: formFullName,
           dni: formDni,
-          address: [formStreetName, formStreetNumber]
-            .filter(Boolean)
-            .join(" "),
+          address: [formStreetName, formStreetNumber].filter(Boolean).join(" "),
           city: formCity,
           province: formProvince,
           postalCode: formPostalCode,
@@ -754,7 +769,7 @@ export default function ProfileScreen() {
     } catch (error: any) {
       Alert.alert(
         "No pudimos guardar los datos",
-        error?.message || "Intentá nuevamente."
+        error?.message || "Intentá nuevamente.",
       );
     } finally {
       setSavingProfile(false);
@@ -772,6 +787,13 @@ export default function ProfileScreen() {
         style: "destructive",
         onPress: async () => {
           await logoutApp();
+          if (Platform.OS !== "web") {
+            try {
+              await clearNativeGoogleSession();
+            } catch {
+              /* Local ShopX session is already cleared. */
+            }
+          }
 
           setUser(null);
           setCheckoutProfile(null);
@@ -844,19 +866,19 @@ export default function ProfileScreen() {
 
               Alert.alert(
                 "Cuenta eliminada",
-                "Tu cuenta fue eliminada correctamente."
+                "Tu cuenta fue eliminada correctamente.",
               );
             } catch (error: any) {
               Alert.alert(
                 "No pudimos eliminar la cuenta",
-                error?.message || "Intentá nuevamente en unos minutos."
+                error?.message || "Intentá nuevamente en unos minutos.",
               );
             } finally {
               setDeletingAccount(false);
             }
           },
         },
-      ]
+      ],
     );
   }
 
@@ -940,8 +962,8 @@ export default function ProfileScreen() {
                   orderStats.active > 0
                     ? `${orderStats.active} en curso`
                     : orderStats.delivered > 0
-                    ? `${orderStats.delivered} entregado${orderStats.delivered === 1 ? "" : "s"}`
-                    : "Pedidos"
+                      ? `${orderStats.delivered} entregado${orderStats.delivered === 1 ? "" : "s"}`
+                      : "Pedidos"
                 }
                 icon="package-variant-closed"
                 onPress={() => router.push("/orders")}
@@ -1277,7 +1299,10 @@ export default function ProfileScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.deleteAccountButton, deletingAccount && styles.buttonDisabled]}
+              style={[
+                styles.deleteAccountButton,
+                deletingAccount && styles.buttonDisabled,
+              ]}
               onPress={confirmDeleteAccount}
               disabled={deletingAccount}
             >
@@ -1291,7 +1316,10 @@ export default function ProfileScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+            >
               <Feather name="log-out" size={18} color={muted} />
               <Text style={styles.logoutText}>Cerrar sesión</Text>
             </TouchableOpacity>
@@ -1331,8 +1359,14 @@ export default function ProfileScreen() {
                     <ActivityIndicator color={white} />
                   ) : (
                     <>
-                      <MaterialCommunityIcons name="apple" size={22} color={white} />
-                      <Text style={styles.appleButtonText}>Continuar con Apple</Text>
+                      <MaterialCommunityIcons
+                        name="apple"
+                        size={22}
+                        color={white}
+                      />
+                      <Text style={styles.appleButtonText}>
+                        Continuar con Apple
+                      </Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -1341,12 +1375,17 @@ export default function ProfileScreen() {
               <TouchableOpacity
                 style={[
                   styles.googleButton,
-                  (!googleRequest || googleLoading || appleLoading || submitting) &&
+                  (!googleRequest ||
+                    googleLoading ||
+                    appleLoading ||
+                    submitting) &&
                     styles.buttonDisabled,
                 ]}
                 activeOpacity={0.9}
                 onPress={handleGoogleLogin}
-                disabled={!googleRequest || googleLoading || appleLoading || submitting}
+                disabled={
+                  !googleRequest || googleLoading || appleLoading || submitting
+                }
               >
                 {googleLoading ? (
                   <ActivityIndicator color={text} />
@@ -1433,13 +1472,16 @@ export default function ProfileScreen() {
                     onPress={handleForgotPassword}
                     disabled={submitting || googleLoading || appleLoading}
                   >
-                    <Text style={styles.forgotPasswordText}>Olvidé mi contraseña</Text>
+                    <Text style={styles.forgotPasswordText}>
+                      Olvidé mi contraseña
+                    </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     style={[
                       styles.authSubmitButton,
-                      (submitting || googleLoading || appleLoading) && styles.buttonDisabled,
+                      (submitting || googleLoading || appleLoading) &&
+                        styles.buttonDisabled,
                     ]}
                     activeOpacity={0.9}
                     onPress={handleLogin}
@@ -1449,7 +1491,9 @@ export default function ProfileScreen() {
                       <ActivityIndicator color={white} />
                     ) : (
                       <>
-                        <Text style={styles.authSubmitText}>Iniciar sesión</Text>
+                        <Text style={styles.authSubmitText}>
+                          Iniciar sesión
+                        </Text>
                         <Feather name="arrow-right" size={18} color={white} />
                       </>
                     )}
@@ -1496,7 +1540,8 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     style={[
                       styles.authSubmitButton,
-                      (submitting || googleLoading || appleLoading) && styles.buttonDisabled,
+                      (submitting || googleLoading || appleLoading) &&
+                        styles.buttonDisabled,
                     ]}
                     activeOpacity={0.9}
                     onPress={handleRegister}
