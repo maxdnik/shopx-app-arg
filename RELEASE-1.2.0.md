@@ -11,7 +11,7 @@ Código compilado: `202c0d6748d7942cac901e0e3f46cd86e4979336`. Ambos builds term
 | iOS | 1.2.0 (38) | [Expo iOS](https://expo.dev/accounts/maxdnik/projects/shopx/builds/d6903a2c-b22e-494c-b378-92a7af78ed8c) | [IPA](https://expo.dev/artifacts/eas/AdksBE9gIh25ebU2s82qhIfNZ7mhDx6KXdH9hAaELSw.ipa) |
 | Android | 1.2.0 (8) | [Expo Android](https://expo.dev/accounts/maxdnik/projects/shopx/builds/589cb20c-6ba1-4983-806e-a46601e7d18e) | [AAB](https://expo.dev/artifacts/eas/hebiCK7PKOzapCKvfHS9eHuaBKU6yrzTtslheBm4qlk.aab) |
 
-No se ejecutó EAS Submit ni se enviaron estos builds a las tiendas. El IPA requiere distribución mediante App Store Connect/TestFlight; el AAB se carga en Google Play.
+El 17 de septiembre de 2026 se cargó correctamente el build iOS 1.2.0 (38) en App Store Connect mediante EAS Submit. Android todavía no se envió a Google Play. La carga de iOS no equivale a aprobación ni publicación: faltan los metadatos finales y el envío a App Review.
 
 ## Cambios para clientes
 
@@ -48,7 +48,7 @@ Además de estos controles, se generaron el IPA y el AAB firmados indicados arri
 4. Probar el build firmado en iPhone y Android: inicio de sesión Google/Apple según plataforma, CUIT y dirección, catálogo y variantes, agregar/quitar cantidades, resumen de precios, cotizaciones manuales y agrupadas, zoom y cierre de fotos, seguimiento parcial, retorno desde Mercado Pago y actualización del estado. Verificar que Google Cloud tenga las huellas SHA-1 de las claves de firma de Android (EAS y Play App Signing). Usar cuentas y pagos de prueba autorizados.
 5. Verificar privacidad, capturas y metadatos de las tiendas; subir el build probado a TestFlight/Google Play y enviar a revisión.
 
-No se ejecutaron pagos, envíos de cotizaciones, fusiones de cotizaciones ni cambios en pedidos reales durante las pruebas. Los builds se generaron desde la sesión web de Expo y la revisión de código indicada arriba. No se solicitó envío automático a las tiendas. Las revisiones previas al ajuste nativo de Google no deben publicarse; usar exclusivamente iOS (38) y Android (8) indicados arriba.
+No se ejecutaron pagos, envíos de cotizaciones, fusiones de cotizaciones ni cambios en pedidos reales durante las pruebas. Los builds se generaron desde la sesión web de Expo y la revisión de código indicada arriba. Al generar los paquetes no se solicitó envío automático a las tiendas. El envío manual posterior de iOS se detalla abajo. Las revisiones previas al ajuste nativo de Google no deben publicarse; usar exclusivamente iOS (38) y Android (8) indicados arriba.
 
 ## Texto sugerido para las tiendas
 
@@ -57,3 +57,13 @@ Renovamos ShopX para acercarte la experiencia de nuestra web: descubrí producto
 ## Referencias de configuración
 
 El build iOS usa Xcode 26.0. La configuración Android de React Native 0.81.5 usa target API 36. Se contrastaron con los [requisitos de Apple](https://developer.apple.com/news/upcoming-requirements/) y [Google Play](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en) vigentes al preparar esta versión. La integración nativa de Google sigue la [guía oficial de Expo](https://docs.expo.dev/guides/google-authentication/) y el [plugin del SDK](https://react-native-google-signin.github.io/docs/setting-up/expo).
+
+## Envío de iOS — 17 de septiembre de 2026
+
+- EAS confirmó `Completed` en el [workflow de envío](https://expo.dev/accounts/maxdnik/projects/shopx/workflows/01a0b10a-646e-7711-b7a4-893bd2176506), con una duración de 2m 6s.
+- Submission ID: `c5d185d0-1898-4363-a065-8bd508fd3cd3`.
+- Destino: ShopX Argentina, Apple ID `6774605774`, bundle `com.maximodimnik.shopx`.
+- Se reutilizó la credencial de EAS Submit existente. No se generaron claves nuevas ni se reconstruyó la app.
+- `.eas/workflows/submit-ios-1.2.0.yml` carga únicamente el build final (38), mediante ejecución manual. No se activa al hacer push.
+- App Store Connect solicitó inicio de sesión. Quedan pendientes la revisión de capturas, privacidad y metadatos, la selección del build procesado, y el envío a App Review. No se confirmó el procesamiento de TestFlight ni la publicación en App Store.
+- El acceso al inicio de sesión se solicitó mediante el formulario seguro del navegador. No se recibieron credenciales por chat.
