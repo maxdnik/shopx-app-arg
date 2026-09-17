@@ -1,0 +1,11 @@
+name: Submit ShopX iOS 1.2.0 (38)
+
+# Manual release of the signed, verified artifact. No rebuild and no push trigger.
+jobs:
+  submit_ios_120:
+    name: Upload ShopX 1.2.0 (38) to App Store Connect
+    type: submit
+    environment: production
+    params:
+      build_id: d6903a2c-b22e-494c-b378-92a7af78ed8c
+      profile: production
