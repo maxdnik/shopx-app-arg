@@ -1,3 +1,4 @@
+import { productCategoryLabel } from "../lib/store-catalog";
 import {
   Alert,
   Image,
@@ -44,26 +45,7 @@ function getBrand(product: ShopXProduct) {
   ).toUpperCase();
 }
 
-function getCategoryLabel(product: ShopXProduct) {
-  if (typeof product.category === "string") {
-    return product.category;
-  }
 
-  return (
-    product.category?.leaf ||
-    product.category?.sub ||
-    product.category?.main ||
-    "Producto USA"
-  );
-}
-
-function getProductSourceLabel(product: ShopXProduct) {
-  if (product.source === "amazon") return "AMAZON USA";
-  if (product.source === "ebay") return "EBAY USA";
-  if (product.source === "manual" || product.source === "shopx") return "SHOPX";
-
-  return getBrand(product);
-}
 
 export function ProductCard({
   product,
@@ -166,7 +148,7 @@ export function ProductCard({
       </View>
 
       <Text style={styles.brand} numberOfLines={1}>
-        {getProductSourceLabel(product)}
+        {getBrand(product)}
       </Text>
 
       <Text
@@ -175,16 +157,16 @@ export function ProductCard({
           isGrid && styles.titleGrid,
           isCompact && styles.titleCompact,
         ]}
-        numberOfLines={2}
+        numberOfLines={3}
       >
         {product.title}
       </Text>
 
       <Text style={styles.category} numberOfLines={1}>
-        {getCategoryLabel(product)}
+        {productCategoryLabel(product)}{product.store ? ` · ${product.store}` : ""}
       </Text>
 
-      <Text style={styles.eyebrow}>FINAL ARGENTINA</Text>
+      <Text style={styles.eyebrow}>Precio final Argentina</Text>
 
       <Text
         style={[
@@ -201,6 +183,9 @@ export function ProductCard({
       <Text style={{ color: muted, fontSize: 11, marginTop: 6 }}>
         Entrega estimada: 10–14 días
       </Text>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Comprar ${product.title}`} onPress={(event) => { event.stopPropagation(); onPress(); }} style={styles.buyButton}>
+        <Text style={styles.buyText}>Comprar</Text>
+      </TouchableOpacity>
       {showFooter ? (
         <View style={styles.footer}>
           <Text style={styles.footerText}>Ver detalle</Text>
@@ -225,6 +210,8 @@ export function ProductCard({
 }
 
 const styles = StyleSheet.create({
+  buyButton: { marginTop: 14, minHeight: 42, borderRadius: 24, backgroundColor: navy, alignItems: "center", justifyContent: "center" },
+  buyText: { color: white, fontSize: 13, fontWeight: "900" },
   card: {
     width: "100%",
     minHeight: 286,
@@ -277,7 +264,7 @@ const styles = StyleSheet.create({
   },
 
   imageWrap: {
-    height: 120,
+    aspectRatio: 1,
     borderRadius: 16,
     backgroundColor: softCard,
     alignItems: "center",
@@ -287,11 +274,11 @@ const styles = StyleSheet.create({
   },
 
   imageWrapGrid: {
-    height: 120,
+    aspectRatio: 1,
   },
 
   imageWrapCompact: {
-    height: 120,
+    aspectRatio: 1,
     borderRadius: 16,
     marginBottom: 10,
   },
@@ -303,7 +290,7 @@ const styles = StyleSheet.create({
   },
 
   brand: {
-    color: "#9AA6B8",
+    color: "#167B8C",
     fontSize: 9,
     fontWeight: "900",
     letterSpacing: 1.4,
@@ -315,20 +302,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
     lineHeight: 17,
-    minHeight: 34,
+    minHeight: 51,
   },
 
   titleGrid: {
     fontSize: 13,
     lineHeight: 17,
     fontWeight: "900",
-    minHeight: 34,
+    minHeight: 51,
   },
 
   titleCompact: {
     fontSize: 13,
     lineHeight: 17,
-    minHeight: 34,
+    minHeight: 51,
   },
 
   category: {
@@ -360,13 +347,13 @@ const styles = StyleSheet.create({
   },
 
   priceWithCart: {
-    paddingRight: 38,
+    paddingRight: 0,
   },
 
   cartButton: {
     position: "absolute",
-    right: 10,
-    bottom: 10,
+    right: 44,
+    top: 8,
     width: 36,
     height: 36,
     borderRadius: 18,

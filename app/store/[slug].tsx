@@ -1,615 +1,95 @@
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { ProductCard } from "../../components/ProductCard";
-import {
-  getProductsByStore,
-  ShopXProduct,
-} from "../../lib/api";
-import {
-  FALLBACK_STORES,
-  getOfficialStores,
-  ShopXStore,
-} from "../../lib/stores";
-import {
-  canUseRemoteStoreLogo,
-  getStoreLogoSource,
-  getStoreLogoWordmark,
-} from "../../lib/store-logos";
-
-const navy = "#062B4F";
-const navyDark = "#031A33";
-const text = "#071E35";
-const muted = "#718096";
-const accent = "#18C7D8";
-const soft = "#F7FAFC";
-const softCard = "#F1F5F9";
-const border = "#E2E8F0";
-const white = "#FFFFFF";
-
-function getParamValue(value: string | string[] | undefined) {
-  if (Array.isArray(value)) return value[0] || "";
-  return value || "";
-}
-
-function normalizeStoreSlug(value: string) {
-  return String(value || "").trim().toLowerCase();
-}
+import type { ShopXProduct } from "../../lib/api";
+import { getStoreCatalog, mergeCatalogPages, type StoreCatalogPage } from "../../lib/store-catalog";
+import { saveProductToCache } from "../../lib/product-cache";
+import { FALLBACK_STORES, type ShopXStore } from "../../lib/stores";
+import { canUseRemoteStoreLogo, getStoreLogoSource, getStoreLogoWordmark } from "../../lib/store-logos";
 
 export default function StoreScreen() {
   const params = useLocalSearchParams<{ slug?: string | string[] }>();
-  const storeSlug = normalizeStoreSlug(getParamValue(params.slug));
-
+  const slug = (Array.isArray(params.slug) ? params.slug[0] : params.slug || "").toLowerCase();
+  const insets = useSafeAreaInsets();
   const [store, setStore] = useState<ShopXStore | null>(null);
   const [products, setProducts] = useState<ShopXProduct[]>([]);
+  const [categories, setCategories] = useState<StoreCatalogPage["categories"]>([]);
+  const [category, setCategory] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [inventoryTotal, setInventoryTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  const localLogo = useMemo(
-    () => getStoreLogoSource(store?.slug || storeSlug),
-    [store?.slug, storeSlug]
-  );
-
-  const remoteLogo = useMemo(
-    () => canUseRemoteStoreLogo(store?.logo),
-    [store?.logo]
-  );
-
-  const logoText = useMemo(
-    () => getStoreLogoWordmark(store || { name: storeSlug, slug: storeSlug }),
-    [store, storeSlug]
-  );
-
-  async function loadStorefront(options?: { refresh?: boolean }) {
-    if (!storeSlug) {
-      setErrorMessage("No encontramos esta tienda.");
-      setLoading(false);
-      return;
-    }
-
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  const busy = useRef(false);
+  const list = useRef<FlatList<ShopXProduct>>(null);
+  const load = useCallback(async (nextPage: number) => {
+    if (nextPage > 1 && busy.current) return;
+    const id = ++generation.current;
+    busy.current = true;
+    setLoading(true); setError("");
+    if (nextPage === 1) { setPage(1); setProducts([]); setHasMore(false); }
     try {
-      if (options?.refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
-      setErrorMessage("");
-
-      const [storesResult, productsResult] = await Promise.all([
-        getOfficialStores(),
-        getProductsByStore(storeSlug, 36),
-      ]);
-
-      const matchedStore =
-        storesResult.find((item) => item.slug === storeSlug) ||
-        FALLBACK_STORES.find((item) => item.slug === storeSlug) ||
-        null;
-
-      setStore(matchedStore);
-      setProducts(productsResult);
-    } catch (error) {
-      console.log("ERROR STORE SCREEN:", error);
-
-      const fallbackStore =
-        FALLBACK_STORES.find((item) => item.slug === storeSlug) || null;
-
-      setStore(fallbackStore);
-      setErrorMessage(
-        "No pudimos cargar la tienda ahora. Podés buscar la marca o cotizar un link."
-      );
+      const result = await getStoreCatalog(slug, category, nextPage);
+      if (id !== generation.current) return;
+      setStore(result.store);
+      setCategories(result.categories);
+      setProducts(current => nextPage === 1 ? result.products : mergeCatalogPages(current, result.products));
+      setTotal(result.pagination.total); setInventoryTotal(result.totalProducts);
+      setPage(nextPage); setHasMore(result.pagination.hasMore);
+    } catch (e) {
+      if (id === generation.current) setError(e instanceof Error ? e.message : "No pudimos cargar la tienda.");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (id === generation.current) { busy.current = false; setLoading(false); }
     }
-  }
-
-  useEffect(() => {
-    loadStorefront();
-  }, [storeSlug]);
-
-  function openProduct(product: ShopXProduct) {
-    if (!product.slug) return;
-    router.push(`/product/${product.slug}`);
-  }
-
-  function openSearch() {
-    router.push({
-      pathname: "/search",
-      params: { q: store?.searchQuery || store?.name || storeSlug },
-    });
-  }
-
-  return (
-    <View style={styles.app}>
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => loadStorefront({ refresh: true })}
-            tintColor={accent}
-          />
-        }
-      >
-        <View style={styles.headerShell}>
-          <View style={styles.headerTopRow}>
-            <TouchableOpacity
-              style={styles.backButton}
-              activeOpacity={0.85}
-              onPress={() => router.back()}
-            >
-              <Feather name="chevron-left" size={23} color={white} />
-            </TouchableOpacity>
-
-            <View style={styles.headerBadge}>
-              <Feather name="shield" size={14} color={accent} />
-              <Text style={styles.headerBadgeText}>Tienda oficial USA</Text>
-            </View>
+  }, [slug, category]);
+  useEffect(() => { setCategory(""); setStore(null); setCategories([]); }, [slug]);
+  useEffect(() => { void load(1); return () => { generation.current++; busy.current = false; }; }, [load]);
+  const currentStore = store || FALLBACK_STORES.find(item => item.slug === slug);
+  const localLogo = getStoreLogoSource(slug);
+  const logo = localLogo || (canUseRemoteStoreLogo(currentStore?.logo) ? { uri: currentStore?.logo } : null);
+  const selectCategory = (value: string) => { setCategory(value); list.current?.scrollToOffset({offset:0,animated:false}); };
+  return <View style={s.app}>
+    <FlatList ref={list} data={products} numColumns={2}
+      keyExtractor={item => item._id || item.id || item.slug}
+      columnWrapperStyle={s.row}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 110 }}
+      refreshControl={<RefreshControl refreshing={loading && page === 1} onRefresh={() => load(1)} />}
+      onEndReached={() => { if (hasMore && !loading && !error) void load(page + 1); }} onEndReachedThreshold={0.4}
+      ListHeaderComponent={<>
+        <View style={[s.hero, {paddingTop:insets.top+14}]}>
+          <TouchableOpacity accessibilityLabel="Volver" onPress={() => router.back()} style={s.back}><Feather name="chevron-left" size={24} color="white" /></TouchableOpacity>
+          <View style={s.identity}>
+            <View style={s.logo}>{logo ? <Image source={logo} style={{width:64,height:64}} resizeMode="contain" /> : <Text style={s.logoText}>{getStoreLogoWordmark(currentStore || {name:slug,slug})}</Text>}</View>
+            <View style={{flex:1}}><Text style={s.eyebrow}>PRODUCTOS DE ESTADOS UNIDOS</Text><Text style={s.title}>{currentStore?.name || "ShopX"}</Text></View>
           </View>
-
-          <View style={styles.heroCard}>
-            <View style={styles.storeColorRail} />
-
-            <View style={styles.logoBox}>
-              {localLogo ? (
-                <Image
-                  source={localLogo}
-                  style={styles.logoImage}
-                  resizeMode="contain"
-                />
-              ) : remoteLogo && store?.logo ? (
-                <Image
-                  source={{ uri: store.logo }}
-                  style={styles.logoImage}
-                  resizeMode="contain"
-                />
-              ) : (
-                <Text style={styles.logoWordmark} numberOfLines={2}>
-                  {logoText}
-                </Text>
-              )}
-            </View>
-
-            <View style={styles.heroTextBox}>
-              <Text style={styles.eyebrow}>SHOPX ACCESS</Text>
-              <Text style={styles.title} numberOfLines={2}>
-                {store?.name || "Tienda ShopX"}
-              </Text>
-              <Text style={styles.subtitle}>
-                Productos curados de USA con precio final Argentina: impuestos,
-                aduana, gestión y entrega incluidos.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.trustRow}>
-            <View style={styles.trustPill}>
-              <MaterialCommunityIcons
-                name="cash-check"
-                size={17}
-                color={accent}
-              />
-              <Text style={styles.trustText}>Precio final</Text>
-            </View>
-
-            <View style={styles.trustPill}>
-              <Feather name="truck" size={16} color={accent} />
-              <Text style={styles.trustText}>Entrega local</Text>
-            </View>
-
-            <View style={styles.trustPill}>
-              <Feather name="map-pin" size={16} color={accent} />
-              <Text style={styles.trustText}>Tracking</Text>
-            </View>
-          </View>
+          <Text style={s.intro}>Explorá el catálogo completo con precio final Argentina.</Text>
         </View>
-
-        <View style={styles.body}>
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={styles.sectionEyebrow}>CURADO POR SHOPX</Text>
-              <Text style={styles.sectionTitle}>Productos disponibles</Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.searchButton}
-              activeOpacity={0.85}
-              onPress={openSearch}
-            >
-              <Text style={styles.searchButtonText}>Buscar más</Text>
-              <Feather name="arrow-up-right" size={15} color={accent} />
-            </TouchableOpacity>
+        <View style={s.filters}>
+          <Text style={s.heading}>Categorías</Text>
+          <View style={s.chips}>
+            {[{label:"Todos",count:inventoryTotal,value:""}, ...categories.map(item=>({...item,value:item.label}))].map(item=><TouchableOpacity key={item.value} accessibilityRole="button" accessibilityState={{selected:category===item.value}} accessibilityLabel={`${item.label}, ${item.count} productos`} onPress={()=>selectCategory(item.value)} style={[s.chip,category===item.value&&s.active]}><Text style={[s.chipText,category===item.value&&s.activeText]}>{item.label} ({item.count})</Text></TouchableOpacity>)}
           </View>
-
-          {loading ? (
-            <View style={styles.stateCard}>
-              <ActivityIndicator color={accent} />
-              <Text style={styles.stateTitle}>Cargando tienda...</Text>
-              <Text style={styles.stateText}>
-                Estamos preparando los productos con precio final Argentina.
-              </Text>
-            </View>
-          ) : errorMessage ? (
-            <View style={styles.stateCard}>
-              <View style={styles.stateIconCircle}>
-                <Feather name="wifi-off" size={22} color={accent} />
-              </View>
-              <Text style={styles.stateTitle}>No pudimos cargar todo</Text>
-              <Text style={styles.stateText}>{errorMessage}</Text>
-
-              <View style={styles.stateActionsRow}>
-                <TouchableOpacity
-                  style={styles.primaryAction}
-                  activeOpacity={0.9}
-                  onPress={openSearch}
-                >
-                  <Text style={styles.primaryActionText}>Buscar marca</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.secondaryAction}
-                  activeOpacity={0.9}
-                  onPress={() => router.push("/quote")}
-                >
-                  <Text style={styles.secondaryActionText}>Cotizar link</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : products.length > 0 ? (
-            <View style={styles.productsGrid}>
-              {products.map((product) => (
-                <View
-                  key={product.slug || product.id || product._id}
-                  style={styles.productColumn}
-                >
-                  <ProductCard
-                    product={product}
-                    variant="grid"
-                    onPress={() => openProduct(product)}
-                  />
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.stateCard}>
-              <View style={styles.stateIconCircle}>
-                <Feather name="shopping-bag" size={22} color={accent} />
-              </View>
-              <Text style={styles.stateTitle}>Todavía no hay productos cargados</Text>
-              <Text style={styles.stateText}>
-                Podés buscar esta marca en ShopX o pegar un link específico para
-                que lo coticemos.
-              </Text>
-
-              <View style={styles.stateActionsRow}>
-                <TouchableOpacity
-                  style={styles.primaryAction}
-                  activeOpacity={0.9}
-                  onPress={openSearch}
-                >
-                  <Text style={styles.primaryActionText}>Buscar marca</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.secondaryAction}
-                  activeOpacity={0.9}
-                  onPress={() => router.push("/quote")}
-                >
-                  <Text style={styles.secondaryActionText}>Cotizar link</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+          <Text style={s.count}>{total} productos{category ? ` · ${category}` : ""}</Text>
         </View>
-      </ScrollView>
-
-      <AppBottomNav />
-    </View>
-  );
+      </>}
+      renderItem={({item})=><View style={s.column}><ProductCard product={item} variant="grid" onPress={()=>{saveProductToCache(item);router.push({pathname:"/product/[id]",params:{id:item.slug||item._id||""}});}} /></View>}
+      ListEmptyComponent={!loading&&!error?<Text style={s.state}>No hay productos en esta categoría.</Text>:null}
+      ListFooterComponent={<View style={s.footer}>
+        {loading&&<ActivityIndicator color="#00A6C8" />}
+        {!!error&&<><Text style={s.state}>{error}</Text><TouchableOpacity style={s.action} onPress={()=>load(products.length?page+1:1)}><Text style={s.activeText}>Reintentar</Text></TouchableOpacity></>}
+        {!loading&&!error&&hasMore&&<TouchableOpacity style={s.action} onPress={()=>load(page+1)}><Text style={s.activeText}>Ver más productos ({products.length} de {total})</Text></TouchableOpacity>}
+        {!loading&&!error&&!hasMore&&products.length>0&&<Text style={s.count}>Viste los {products.length} productos.</Text>}
+      </View>}
+    />
+    <AppBottomNav />
+  </View>;
 }
-
-const styles = StyleSheet.create({
-  app: {
-    flex: 1,
-    backgroundColor: soft,
-  },
-
-  screen: {
-    flex: 1,
-  },
-
-  content: {
-    paddingBottom: 104,
-  },
-
-  headerShell: {
-    backgroundColor: navy,
-    paddingTop: 58,
-    paddingHorizontal: 18,
-    paddingBottom: 20,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    overflow: "hidden",
-  },
-
-  headerTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 18,
-  },
-
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  headerBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.11)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-  },
-
-  headerBadgeText: {
-    color: white,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 0.35,
-  },
-
-  heroCard: {
-    position: "relative",
-    backgroundColor: white,
-    borderRadius: 28,
-    padding: 18,
-    overflow: "hidden",
-    shadowColor: navyDark,
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
-  },
-
-  storeColorRail: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 5,
-    backgroundColor: accent,
-  },
-
-  logoBox: {
-    width: 82,
-    height: 82,
-    borderRadius: 26,
-    backgroundColor: softCard,
-    borderWidth: 1,
-    borderColor: border,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-
-  logoImage: {
-    width: 62,
-    height: 44,
-  },
-
-  logoWordmark: {
-    color: navy,
-    fontSize: 16,
-    lineHeight: 18,
-    fontWeight: "900",
-    textAlign: "center",
-    letterSpacing: -0.25,
-  },
-
-  heroTextBox: {
-    maxWidth: "94%",
-  },
-
-  eyebrow: {
-    color: accent,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.6,
-    marginBottom: 5,
-  },
-
-  title: {
-    color: text,
-    fontSize: 31,
-    lineHeight: 36,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-  },
-
-  subtitle: {
-    color: muted,
-    fontSize: 13.5,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginTop: 10,
-  },
-
-  trustRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 14,
-  },
-
-  trustPill: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-
-  trustText: {
-    color: white,
-    fontSize: 10.5,
-    fontWeight: "900",
-  },
-
-  body: {
-    paddingHorizontal: 18,
-    paddingTop: 20,
-  },
-
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-
-  sectionEyebrow: {
-    color: accent,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.35,
-  },
-
-  sectionTitle: {
-    color: text,
-    fontSize: 21,
-    fontWeight: "900",
-    letterSpacing: -0.45,
-    marginTop: 3,
-  },
-
-  searchButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingBottom: 3,
-  },
-
-  searchButtonText: {
-    color: accent,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-
-  productsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-
-  productColumn: {
-    width: "48.2%",
-  },
-
-  stateCard: {
-    backgroundColor: white,
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 22,
-    alignItems: "center",
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
-
-  stateIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 17,
-    backgroundColor: "#EAF8FB",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
-
-  stateTitle: {
-    color: text,
-    fontSize: 17,
-    fontWeight: "900",
-    textAlign: "center",
-    marginTop: 10,
-  },
-
-  stateText: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "700",
-    textAlign: "center",
-    marginTop: 8,
-  },
-
-  stateActionsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 18,
-  },
-
-  primaryAction: {
-    minWidth: 118,
-    height: 44,
-    borderRadius: 15,
-    backgroundColor: navy,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-
-  primaryActionText: {
-    color: white,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-
-  secondaryAction: {
-    minWidth: 118,
-    height: 44,
-    borderRadius: 15,
-    backgroundColor: "#EAF8FB",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-
-  secondaryActionText: {
-    color: navy,
-    fontSize: 13,
-    fontWeight: "900",
-  },
+const s=StyleSheet.create({
+  app:{flex:1,backgroundColor:"#F8FAFC"},hero:{backgroundColor:"#071E3A",padding:18,paddingBottom:26},back:{width:44,height:44,justifyContent:"center"},identity:{flexDirection:"row",gap:16,alignItems:"center",marginTop:12},logo:{width:80,height:80,padding:8,borderRadius:20,backgroundColor:"white",justifyContent:"center",alignItems:"center"},logoText:{fontSize:14,fontWeight:"900",color:"#071E3A"},eyebrow:{fontSize:10,letterSpacing:1.3,color:"#67DCE9",fontWeight:"800"},title:{fontSize:28,fontWeight:"900",color:"white",marginTop:8},intro:{color:"#D9E4F0",lineHeight:22,marginTop:20},filters:{padding:18,gap:14},heading:{fontSize:20,fontWeight:"900",color:"#071E3A"},chips:{flexDirection:"row",flexWrap:"wrap",gap:8},chip:{maxWidth:"100%",paddingHorizontal:14,paddingVertical:11,borderRadius:24,borderWidth:1,borderColor:"#E2E8F0",backgroundColor:"white"},chipText:{color:"#0A2647",fontWeight:"700",fontSize:12},active:{backgroundColor:"#0A2647",borderColor:"#0A2647"},activeText:{color:"white",fontWeight:"800"},count:{color:"#64748B",fontSize:13},row:{paddingHorizontal:18,gap:12,marginBottom:14},column:{flex:1,maxWidth:"50%"},footer:{padding:20,alignItems:"center",gap:12},state:{padding:18,textAlign:"center",color:"#64748B"},action:{borderRadius:24,backgroundColor:"#071E3A",paddingHorizontal:22,paddingVertical:14}
 });

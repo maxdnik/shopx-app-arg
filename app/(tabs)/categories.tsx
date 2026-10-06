@@ -194,18 +194,14 @@ export default function CategoriesScreen() {
               )}
             </ScrollView>
             {!!selected?.subcategories.length && (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={s.chips}
-              >
+              <View style={[s.chips, { flexWrap: "wrap", flexDirection: "row" }]}>
                 {chip("", "Todos", !subcategory, () => setSubcategory(""))}
                 {selected.subcategories.map((item) =>
                   chip(item.key, item.label, subcategory === item.label, () =>
                     setSubcategory(item.label),
                   ),
                 )}
-              </ScrollView>
+              </View>
             )}
             {category === "clothing" && (
               <ScrollView horizontal contentContainerStyle={s.chips}>

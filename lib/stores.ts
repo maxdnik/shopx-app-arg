@@ -11,6 +11,13 @@ export type ShopXStore = {
 };
 
 export const FALLBACK_STORES: ShopXStore[] = [
+  { id: "gap", name: "GAP", slug: "gap", logo: "https://www.shopx-ar.com/logos/gap.svg", color: "#0A2647", searchQuery: "GAP" },
+  { id: "polo-ralph-lauren", name: "Polo Ralph Lauren", slug: "polo-ralph-lauren", logo: "https://www.shopx-ar.com/logos/ralph-lauren.png", color: "#0A2647", searchQuery: "Polo Ralph Lauren" },
+  { id: "ralph-lauren", name: "Ralph Lauren", slug: "ralph-lauren", logo: "https://www.shopx-ar.com/logos/ralph-lauren.png", color: "#0A2647", searchQuery: "Ralph Lauren" },
+  { id: "vans", name: "Vans", slug: "vans", logo: "https://www.shopx-ar.com/logos/vans.svg", color: "#D71920", searchQuery: "Vans" },
+  { id: "nerf", name: "NERF", slug: "nerf", logo: "https://www.shopx-ar.com/logos/nerf.png", color: "#FF6A00", searchQuery: "NERF" },
+  { id: "columbia", name: "Columbia", slug: "columbia", logo: "https://www.shopx-ar.com/logos/columbia.png", color: "#0072CE", searchQuery: "Columbia" },
+  { id: "ross", name: "Ross", slug: "ross", logo: "https://upload.wikimedia.org/wikipedia/commons/7/7a/Ross_Stores_logo.svg", color: "#C8102E", searchQuery: "Ross" },
   { id: "lego", name: "LEGO", slug: "lego", logo: "https://upload.wikimedia.org/wikipedia/commons/2/24/LEGO_logo.svg", color: "#FFCF00", searchQuery: "LEGO" },
   { id: "apple", name: "Apple", slug: "apple", logo: "https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg", color: "#A2AAAD", searchQuery: "Apple" },
   { id: "nike", name: "Nike", slug: "nike", logo: "https://upload.wikimedia.org/wikipedia/commons/a/a6/Logo_NIKE.svg", color: "#111111", searchQuery: "Nike" },

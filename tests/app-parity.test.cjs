@@ -204,3 +204,18 @@ test("Quote basket preserves retailer selections and base price without inventin
   assert.equal(product.finalPriceUSD, undefined);
   assert.deepEqual(product.selectedOptions, { Color: "Blue", Talle: "M" });
 });
+
+
+test("Store catalog encodes filters and can request pages after the old 36-product limit", async () => {
+  let called;
+  const store = load("lib/store-catalog.ts", { "./request": { request: async url => { called = url; return { products: [] }; } } });
+  await store.getStoreCatalog("polo-ralph-lauren", "Camperas y Abrigos", 17);
+  const url = new URL(called, "https://www.shopx-ar.com");
+  assert.equal(url.pathname, "/api/app/stores/polo-ralph-lauren/products");
+  assert.equal(url.searchParams.get("page"), "17");
+  assert.equal(url.searchParams.get("category"), "Camperas y Abrigos");
+  assert.equal(url.searchParams.get("limit"), "24");
+  assert.equal(store.productCategoryLabel({categoryLabel:"Pantalones",category:{main:"Ropa"}}),"Pantalones");
+  assert.equal(store.productCategoryLabel({category:{main:"Ropa",sub:"Gorras"}}),"Gorras");
+  assert.deepEqual(store.mergeCatalogPages([{_id:"a"}],[{_id:"a"},{_id:"b"},{_id:"b"},{_id:"c"}]).map(p=>p._id),["a","b","c"]);
+});

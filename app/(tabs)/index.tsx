@@ -153,6 +153,9 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        <View style={{flexDirection:"row",gap:12,paddingHorizontal:18,marginVertical:14}}>
+          {[{slug:"gap",label:"GAP"},{slug:"polo-ralph-lauren",label:"Polo Ralph Lauren"}].map(brand=><TouchableOpacity key={brand.slug} accessibilityRole="button" onPress={()=>router.push({pathname:"/store/[slug]",params:{slug:brand.slug}})} style={{flex:1,padding:18,backgroundColor:"#071E3A",borderRadius:20}}><Text style={{color:"white",fontWeight:"900",fontSize:17}}>{brand.label}</Text><Text style={{color:"#67DCE9",marginTop:8,fontSize:12}}>Ver catálogo completo →</Text></TouchableOpacity>)}
+        </View>
         <TouchableOpacity
           style={s.location}
           onPress={() => router.push("/profile")}

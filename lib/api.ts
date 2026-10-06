@@ -52,6 +52,9 @@ export type ShopXProduct = {
   finalPriceUSD?: number;
   description?: string;
   category?: ProductCategory;
+  categoryLabel?: string;
+  available?: boolean;
+  retailerPromotion?: { discountPercent?: number };
   images?: string[];
   imageUrls?: string[];
   image?: string;
