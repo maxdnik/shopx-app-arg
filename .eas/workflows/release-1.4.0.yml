@@ -1,0 +1,33 @@
+name: ShopX 1.4.0 ecommerce home
+on:
+  push:
+    branches: ['release/shopx-1.4.0']
+jobs:
+  verify:
+    name: Verify ecommerce home
+    environment: production
+    steps:
+      - uses: eas/checkout
+      - uses: eas/install_node_modules
+      - run: npm run verify:release
+  ios:
+    name: Build ShopX 1.4.0 iOS
+    needs: [verify]
+    type: build
+    params:
+      platform: ios
+      profile: production
+  android:
+    name: Build ShopX 1.4.0 Android
+    needs: [verify]
+    type: build
+    params:
+      platform: android
+      profile: production
+  submit_ios:
+    name: Upload ShopX 1.4.0 to App Store Connect
+    needs: [ios]
+    type: submit
+    params:
+      build_id: ${{ needs.ios.outputs.build_id }}
+      profile: production

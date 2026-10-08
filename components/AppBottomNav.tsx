@@ -1,167 +1,38 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router, usePathname } from "expo-router";
+import { router, usePathname, type Href } from "expo-router";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-const navy = "#062B4F";
-const muted = "#718096";
-const accent = "#18C7D8";
-const border = "#E2E8F0";
-const white = "#FFFFFF";
-
-function isActive(pathname: string, matches: string[]) {
-  return matches.some((match) => {
-    if (match === "/") {
-      return (
-        pathname === "/" || pathname === "/index" || pathname === "/(tabs)"
-      );
-    }
-
-    return pathname.startsWith(match);
-  });
-}
+const tabs = [
+  { route: "/", label: "Inicio", icon: "home" },
+  { route: "/categories", label: "Categorías", icon: "grid" },
+  { route: "/quote", label: "Cotizar", icon: "link" },
+  { route: "/orders", label: "Pedidos", icon: "box" },
+  { route: "/profile", label: "Mi cuenta", icon: "user" },
+] as const;
 
 export function AppBottomNav() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-
-  const homeActive = isActive(pathname, ["/"]);
-  const categoriesActive = isActive(pathname, ["/categories"]);
-  const quoteActive = isActive(pathname, ["/quote"]);
-  const ordersActive = isActive(pathname, ["/orders"]);
-  const profileActive = isActive(pathname, ["/profile"]);
-
   return (
-    <View
-      style={[styles.bottomNavWrap, { bottom: Math.max(12, insets.bottom) }]}
-    >
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={styles.navItem}
-          activeOpacity={0.85}
-          onPress={() => router.push("/")}
-        >
-          <Feather name="home" size={23} color={homeActive ? accent : muted} />
-          <Text style={[styles.navLabel, homeActive && styles.navLabelActive]}>
-            Inicio
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          activeOpacity={0.85}
-          onPress={() => router.push("/categories")}
-        >
-          <Feather
-            name="grid"
-            size={23}
-            color={categoriesActive ? accent : muted}
-          />
-          <Text
-            style={[styles.navLabel, categoriesActive && styles.navLabelActive]}
-          >
-            Categorías
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.centerNavItem}
-          activeOpacity={0.9}
-          onPress={() => router.push("/quote")}
-        >
-          <View style={styles.centerNavButton}>
-            <Feather name="plus" size={31} color={white} />
-          </View>
-          <Text style={[styles.navLabel, quoteActive && styles.navLabelActive]}>
-            Cotizar
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          activeOpacity={0.85}
-          onPress={() => router.push("/orders")}
-        >
-          <Feather name="box" size={23} color={ordersActive ? accent : muted} />
-          <Text
-            style={[styles.navLabel, ordersActive && styles.navLabelActive]}
-          >
-            Pedidos
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          activeOpacity={0.85}
-          onPress={() => router.push("/profile")}
-        >
-          <Feather
-            name="user"
-            size={23}
-            color={profileActive ? accent : muted}
-          />
-          <Text
-            style={[styles.navLabel, profileActive && styles.navLabelActive]}
-          >
-            Mi cuenta
-          </Text>
-        </TouchableOpacity>
+    <View style={[s.wrap, { paddingBottom: Math.max(8, insets.bottom) }]}>
+      <View style={s.bar}>
+        {tabs.map((tab) => {
+          const active = tab.route === "/" ? ["/", "/index", "/(tabs)"].includes(pathname) : pathname.startsWith(tab.route);
+          const color = active ? "#087C91" : "#718096";
+          return <TouchableOpacity key={tab.route} style={s.item} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{ selected: active }} activeOpacity={0.8} onPress={() => router.navigate(tab.route as Href)}>
+            <Feather name={tab.icon} size={25} color={active ? "#16BED2" : color} />
+            <Text style={[s.label, { color }, active && s.active]} numberOfLines={1}>{tab.label}</Text>
+          </TouchableOpacity>;
+        })}
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  bottomNavWrap: {
-    position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 18,
-    zIndex: 50,
-  },
-  bottomNav: {
-    height: 76,
-    borderRadius: 30,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-    shadowColor: navy,
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 7,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 6,
-  },
-  centerNavItem: {
-    flex: 1,
-    alignItems: "center",
-    marginTop: -28,
-  },
-  centerNavButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: navy,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 7,
-    borderColor: white,
-  },
-  navLabel: {
-    marginTop: 2,
-    color: muted,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  navLabelActive: {
-    color: accent,
-    fontWeight: "900",
-  },
+const s = StyleSheet.create({
+  wrap: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 50, backgroundColor: "#FFFFFF", borderTopWidth: 1, borderColor: "#E8EDF2" },
+  bar: { flexDirection: "row", maxWidth: 640, width: "100%", alignSelf: "center", height: 64, paddingHorizontal: 8 },
+  item: { flex: 1, alignItems: "center", justifyContent: "center", gap: 5 },
+  label: { fontSize: 10, fontWeight: "500" },
+  active: { fontWeight: "700" },
 });
