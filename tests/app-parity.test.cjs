@@ -219,3 +219,44 @@ test("Store catalog encodes filters and can request pages after the old 36-produ
   assert.equal(store.productCategoryLabel({category:{main:"Ropa",sub:"Gorras"}}),"Gorras");
   assert.deepEqual(store.mergeCatalogPages([{_id:"a"}],[{_id:"a"},{_id:"b"},{_id:"b"},{_id:"c"}]).map(p=>p._id),["a","b","c"]);
 });
+
+test("Storefront only labels delivered prices as final and falls back to USD without FX", () => {
+  const store = load("lib/storefront.ts", { "./request": {} });
+  assert.equal(store.storefrontPrice({ priceUSD: 45 }, 1540).text, "Ver precio");
+  const product = { priceUSD: 45, finalPriceUSD: 100 };
+  assert.equal(store.storefrontPrice(product, 1540).text, "$ 154.000");
+  assert.equal(store.storefrontPrice(product, NaN).caption, "Precio final en USD");
+  assert.equal(store.storefrontPrice(product, 0).text, "USD 100");
+  assert.equal(store.finalPriceUSD({ finalPriceUSD: Infinity, estimatedUSD: 25 }), 25);
+});
+
+test("Storefront excludes unavailable, duplicate and unpriced cards and requires variant selection", () => {
+  const store = load("lib/storefront.ts", { "./request": {} });
+  const product = { _id: "a", slug: "a", title: "Item", finalPriceUSD: 100, images: ["https://example.test/a.jpg"] };
+  const products = [product, { ...product }, { ...product, slug: "b", available: false }, { ...product, slug: "c", images: [] }, { ...product, slug: "d", images: ["/placeholder.png"] }, { ...product, slug: "e", finalPriceUSD: undefined, priceUSD: 10 }];
+  assert.deepEqual(store.visibleStorefrontProducts(products).map(p => p.slug), ["a"]);
+  assert.equal(store.needsProductSelection(product), false);
+  assert.equal(store.needsProductSelection({ ...product, options: [{ name: "Talle", values: ["M"] }] }), true);
+  assert.equal(store.needsProductSelection({ ...product, variationMatrix: [{ sku: "a" }] }), true);
+});
+
+test("The want-it collection retries failures, preserves editorial order and deduplicates requests", async () => {
+  let calls = 0;
+  let fail = true;
+  const product = { slug: "a", title: "Item", finalPriceUSD: 100, images: ["https://example.test/a.jpg"] };
+  const store = load("lib/storefront.ts", { "./request": { request: async url => {
+    assert.equal(url, "/api/app/want-it"); calls++;
+    if (fail) throw new Error("network");
+    return { products: [{ ...product, slug: "b" }, product] };
+  } } });
+  await assert.rejects(store.getWantItProducts(), /network/);
+  fail = false;
+  const [a, b] = await Promise.all([store.getWantItProducts(), store.getWantItProducts()]);
+  assert.deepEqual(a.map(p => p.slug), ["b", "a"]);
+  assert.deepEqual(a, b);
+  assert.equal(calls, 2);
+  await store.getWantItProducts();
+  assert.equal(calls, 2);
+  await store.getWantItProducts(true);
+  assert.equal(calls, 3);
+});

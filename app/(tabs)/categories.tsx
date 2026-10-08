@@ -23,11 +23,11 @@ import type { ShopXProduct } from "../../lib/api";
 import { saveProductToCache } from "../../lib/product-cache";
 
 export default function CategoriesScreen() {
-  const params = useLocalSearchParams<{ category?: string }>();
+  const params = useLocalSearchParams<{ category?: string; subcategory?: string }>();
   const insets = useSafeAreaInsets();
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [category, setCategory] = useState(params.category || "all");
-  const [subcategory, setSubcategory] = useState("");
+  const [subcategory, setSubcategory] = useState(params.subcategory || "");
   const [audience, setAudience] = useState("all");
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -49,9 +49,9 @@ export default function CategoriesScreen() {
   useEffect(() => {
     if (params.category) {
       setCategory(params.category);
-      setSubcategory("");
+      setSubcategory(params.subcategory || "");
     }
-  }, [params.category]);
+  }, [params.category, params.subcategory]);
   useEffect(() => {
     const timeout = setTimeout(() => setDebounced(query.trim()), 350);
     return () => clearTimeout(timeout);
