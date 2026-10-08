@@ -237,7 +237,7 @@ export default function QuoteScreen() {
       </View> : <>
         {!manual && <View style={s.card}>
           <Text style={s.heading}>{basket ? "Sumá otro producto" : "Link del producto"}</Text>
-          <TextInput accessibilityLabel="Links de productos de USA" multiline autoCapitalize="none" autoCorrect={false} keyboardType="url" value={input} onChangeText={value => { setInput(value); setError(""); }} editable={!loading} placeholder="Pegá un link de cualquier tienda de USA" style={s.input} />
+          <TextInput accessibilityLabel="Links de productos de USA" multiline autoCapitalize="none" autoCorrect={false} keyboardType="url" value={input} onChangeText={value => { setInput(value); setError(""); }} editable={!loading} placeholder="Pegá un link de cualquier tienda de USA" placeholderTextColor="#596B82" style={s.input} />
           {button("Cotizar", submit, loading || !input.trim())}
           <Text style={s.text}>Automático: {SUPPORTED_BRIGHTDATA_RETAILERS_LABEL}. Hasta cinco links y dos tiendas por operación.</Text>
         </View>}
