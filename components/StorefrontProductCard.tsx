@@ -81,14 +81,14 @@ export function StorefrontProductCard({ product, exchangeRate }: { product: Shop
 }
 
 const s = StyleSheet.create({
-  card: { backgroundColor: "#FFFFFF", borderRadius: 16, borderColor: "#E4EAF0", borderWidth: 1, overflow: "hidden", height: "100%" },
+  card: { backgroundColor: "#FFFFFF", borderRadius: 16, borderColor: "#E4EAF0", borderWidth: 1, overflow: "hidden" },
   imageWrap: { aspectRatio: 1.16, backgroundColor: "#F1F3F5", overflow: "hidden" },
   image: { width: "100%", height: "100%" },
   imageError: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, padding: 10 },
   favorite: { position: "absolute", right: 7, top: 7, width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFFFFFF2", alignItems: "center", justifyContent: "center" },
   favoriteActive: { backgroundColor: "#087C91" },
   title: { fontSize: 13, lineHeight: 17, fontWeight: "600", color: "#082A49", paddingHorizontal: 10, marginTop: 9, minHeight: 34 },
-  priceRow: { flexDirection: "row", alignItems: "center", gap: 4, padding: 10, paddingTop: 6, marginTop: "auto" },
+  priceRow: { flexDirection: "row", alignItems: "center", gap: 4, padding: 10, paddingTop: 6 },
   priceInfo: { flex: 1, gap: 3, minWidth: 0 },
   price: { color: "#082A49", fontWeight: "800", fontSize: 20, letterSpacing: -0.5 },
   caption: { fontSize: 10, color: "#667992" },

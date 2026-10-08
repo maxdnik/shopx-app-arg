@@ -11,7 +11,7 @@ import { StorefrontProductCard } from "../../components/StorefrontProductCard";
 import { useCartCount } from "../../hooks/useCartCount";
 import { getStoredUser } from "../../lib/auth";
 import type { ShopXProduct } from "../../lib/api";
-import { getHomeContent, type HomeContent } from "../../lib/catalog";
+import { getCatalogNavigation, getHomeContent, type CatalogCategory, type HomeContent } from "../../lib/catalog";
 import { getStorefrontExchangeRate, getWantItProducts, visibleStorefrontProducts } from "../../lib/storefront";
 
 const shortcuts = [
@@ -20,6 +20,7 @@ const shortcuts = [
   { label: "Tecnología", image: require("../../assets/images/home/category-technology.jpeg"), category: "technology" },
   { label: "LEGO", image: require("../../assets/store-logos/lego.png"), store: "lego" },
 ];
+const sectionLabels: Record<string, string> = { clothing: "Ropa y accesorios", technology: "Tecnología", toys: "Juguetes y juegos", outdoor: "Outdoor" };
 const brands = [
   { slug: "gap", title: "GAP", image: require("../../assets/images/home/gap.jpg") },
   { slug: "polo-ralph-lauren", title: "Polo Ralph Lauren", image: require("../../assets/images/home/polo.jpg") },
@@ -31,6 +32,7 @@ export default function HomeScreen() {
   const shellWidth = Math.min(width, 640);
   const cardWidth = (shellWidth - 44) / 2;
   const cartCount = useCartCount();
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [content, setContent] = useState<HomeContent>();
   const [products, setProducts] = useState<ShopXProduct[]>([]);
   const [exchangeRate, setExchangeRate] = useState<number>();
@@ -50,6 +52,7 @@ export default function HomeScreen() {
       getWantItProducts(force).then((items) => { if (id === generation.current) setProducts(items); }).catch(() => {
         if (id === generation.current) setError("No pudimos cargar estos productos. Tocá para reintentar.");
       }),
+      getCatalogNavigation().then((value) => { if (id === generation.current) setCategories(value); }),
       getHomeContent(force).then((value) => { if (id === generation.current) setContent(value); }),
       getStorefrontExchangeRate().then((rate) => { if (id === generation.current) setExchangeRate(rate); }).catch(() => {
         // Keep the exact server USD price if the current FX rate is unavailable.
@@ -120,7 +123,7 @@ export default function HomeScreen() {
           {!!error ? <TouchableOpacity accessibilityRole="button" style={s.notice} onPress={() => { void load(true); }}><Text style={s.noticeText}>{error}</Text></TouchableOpacity> : null}
           {loading && !products.length ? <View style={s.loading}><ActivityIndicator color="#087C91" /><Text style={s.noticeText}>Cargando productos…</Text></View> : null}
           {!loading && !error && !products.length ? <View style={s.notice}><Text style={s.noticeText}>Pronto vas a encontrar nuevos productos acá.</Text></View> : null}
-          {products.length > 0 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail} snapToInterval={cardWidth + 12} decelerationRate="fast">
+          {products.length > 0 ? <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail} snapToInterval={cardWidth + 12} decelerationRate="fast">
             {products.slice(0, 8).map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
           </ScrollView> : null}
           <View style={[s.sectionHeader, s.brandHeader]}>
@@ -138,10 +141,33 @@ export default function HomeScreen() {
           </View>
           {weeklyProducts.length > 0 ? <View style={s.weekly}>
             <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Lo más pedido</Text></View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail}>
+            <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail}>
               {weeklyProducts.map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
             </ScrollView>
           </View> : null}
+          {categories.length > 0 ? <View style={s.weekly}>
+            <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Explorá por categoría</Text></View>
+            <View style={s.categoryGrid}>
+              {categories.map((category) => <TouchableOpacity key={category.key} style={[s.catalogCategory, { width: (shellWidth - 44) / 2 }]} accessibilityRole="button" accessibilityLabel={`Ver ${category.label}`} onPress={() => router.push({ pathname: "/categories", params: { category: category.key, subcategory: "" } })}>
+                <Image source={{ uri: category.image }} style={s.catalogImage} contentFit="contain" cachePolicy="memory-disk" />
+                <Text style={s.catalogLabel}>{category.label}</Text>
+                <Feather name="arrow-right" size={17} color="#087C91" />
+              </TouchableOpacity>)}
+            </View>
+          </View> : null}
+          {Object.entries(sectionLabels).map(([key, label]) => {
+            const items = visibleStorefrontProducts(content?.sections?.[key] || []);
+            if (!items.length) return null;
+            return <View key={key} style={s.weekly}>
+              <View style={s.sectionHeader}>
+                <Text accessibilityRole="header" style={s.sectionTitle}>{label}</Text>
+                <TouchableOpacity style={s.moreButton} accessibilityRole="button" accessibilityLabel={`Ver todo en ${label}`} onPress={() => router.push({ pathname: "/categories", params: { category: key, subcategory: "" } })}><Text style={s.more}>Ver todo</Text><Feather name="arrow-right" size={16} color="#087C91" /></TouchableOpacity>
+              </View>
+              <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail}>
+                {items.map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
+              </ScrollView>
+            </View>;
+          })}
         </View>
       </ScrollView>
       <AppBottomNav />
@@ -176,7 +202,12 @@ const s = StyleSheet.create({
   wantTitle: { fontSize: 24, lineHeight: 25, fontWeight: "900", letterSpacing: -0.8, color: "#082A49", flex: 1 },
   moreButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 4 },
   more: { color: "#087C91", fontSize: 12, fontWeight: "600" },
-  productRail: { paddingHorizontal: 16, gap: 12, paddingBottom: 2, alignItems: "stretch" },
+  rail: { flexGrow: 0, flexShrink: 0 },
+  categoryGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 12 },
+  catalogCategory: { backgroundColor: "white", borderRadius: 16, borderWidth: 1, borderColor: "#E4EAF0", padding: 12, gap: 8 },
+  catalogImage: { width: "100%", height: 90 },
+  catalogLabel: { color: "#082A49", fontSize: 14, fontWeight: "700" },
+  productRail: { paddingHorizontal: 16, gap: 12, paddingBottom: 2, alignItems: "flex-start" },
   brandHeader: { marginTop: 18 },
   sectionTitle: { fontSize: 21, fontWeight: "800", letterSpacing: -0.6, color: "#082A49", flex: 1 },
   brands: { flexDirection: "row", gap: 10, paddingHorizontal: 16 },
