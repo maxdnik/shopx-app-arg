@@ -244,7 +244,7 @@ export default function QuoteScreen() {
         {loading && <View style={s.card}>
           <ActivityIndicator color="#062B4F" />
           <Text style={s.heading}>Estamos calculando tu compra</Text>
-          <Text style={s.text}>Revisamos precio, disponibilidad y envío. Si la tienda no responde en aproximadamente un minuto, podés volver a intentar.</Text>
+          <Text style={s.text}>Revisamos precio, disponibilidad y envío. Si la tienda no responde en 25 segundos, podés volver a intentar.</Text>
           <TouchableOpacity accessibilityRole="button" onPress={cancelCalculation} style={{ minHeight: 44, justifyContent: "center" }}><Text style={s.store}>Cancelar cálculo</Text></TouchableOpacity>
         </View>}
         {!!error && <View style={s.card}>

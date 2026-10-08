@@ -240,7 +240,7 @@ test("Automatic quote uses web timeout and preserves retailer errors for the cor
   const signal = new AbortController().signal;
   assert.equal(await quote.calculateQuoteBasket([url], destination, signal), response);
   assert.equal(called.path, "/api/amazon-quote-batch");
-  assert.equal(called.options.timeoutMs, 65000);
+  assert.equal(called.options.timeoutMs, 25000);
   assert.deepEqual(called.options.body.destination, destination);
   assert.equal(called.options.signal, signal);
   failure = new ApiError("generic", 422, { errors: [{ error: "Best Buy no devolvió una ficha válida", reason: "not_found" }] });

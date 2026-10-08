@@ -35,7 +35,7 @@ export type QuoteBasket = {
   expiresAt?: string;
   error?: string;
 };
-export const AUTOMATIC_QUOTE_TIMEOUT_MS = 65_000;
+export const AUTOMATIC_QUOTE_TIMEOUT_MS = 25_000;
 export const supportsAutomaticQuote = isSupportedBrightDataRetailerUrl;
 
 export function canonicalQuoteUrl(value: string) {

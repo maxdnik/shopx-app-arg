@@ -4,7 +4,7 @@ Referencia: `maxdnik/usa-shopbox` en `c4ad3d3d43e73076569907c31e2925b5b4b3f527`.
 
 - El cálculo automático sigue usando `/api/amazon-quote-batch`, con el destino del perfil y las reglas de precios del servidor. No hay una segunda fórmula en la app.
 - Mismas identidades y normalización de URLs, variantes de eBay/Target/Sephora, límite de cinco links, dos tiendas y tres unidades por producto.
-- Espera máxima de 65 segundos como en la web, cancelación y protección contra respuestas de solicitudes canceladas.
+- Espera máxima de 25 segundos como en la web, cancelación y protección contra respuestas de solicitudes canceladas.
 - Se conserva el error específico del proveedor. Los fallos de lectura de Amazon permanecen en automático; las revisiones de dimensiones y los fallos compatibles de otras tiendas habilitan el formulario manual.
 - El formulario manual usa `/api/quotes` autenticado, código postal argentino obligatorio, hasta diez productos y campos independientes de nombre, talle, color, cantidad y comentarios. Solo un envío explícito crea solicitudes; restaurar el borrador o iniciar sesión no las crea.
 - Un resultado parcial conserva productos válidos y permite quitar el enlace fallido/recalcular. No se envía al carrito una cotización parcial, vencida o bloqueada.
