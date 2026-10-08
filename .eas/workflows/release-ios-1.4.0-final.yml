@@ -1,0 +1,26 @@
+name: ShopX 1.4.0 approved iOS release
+on:
+  push:
+    branches: ['release/shopx-1.4.0-ios-20261008']
+jobs:
+  verify:
+    name: Verify approved ShopX release
+    environment: production
+    steps:
+      - uses: eas/checkout
+      - uses: eas/install_node_modules
+      - run: npm run typecheck && npm run test:parity && npx expo export --platform ios
+  ios:
+    name: Build ShopX 1.4.0 iOS
+    needs: [verify]
+    type: build
+    params:
+      platform: ios
+      profile: production
+  submit_ios:
+    name: Upload ShopX 1.4.0 to App Store Connect
+    needs: [ios]
+    type: submit
+    params:
+      build_id: ${{ needs.ios.outputs.build_id }}
+      profile: production
