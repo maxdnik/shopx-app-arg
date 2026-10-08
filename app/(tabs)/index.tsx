@@ -3,8 +3,9 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { openBrowserAsync } from "expo-web-browser";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { StorefrontProductCard } from "../../components/StorefrontProductCard";
@@ -13,6 +14,17 @@ import { getStoredUser } from "../../lib/auth";
 import type { ShopXProduct } from "../../lib/api";
 import { getCatalogNavigation, getHomeContent, type CatalogCategory, type HomeContent } from "../../lib/catalog";
 import { getStorefrontExchangeRate, getWantItProducts, visibleStorefrontProducts } from "../../lib/storefront";
+
+import { getOfficialStores, type ShopXStore } from "../../lib/stores";
+import { canUseRemoteStoreLogo, getStoreLogoSource, getStoreLogoWordmark } from "../../lib/store-logos";
+import { buildApiUrl } from "../../lib/config";
+
+// Same campaign artwork and collection destinations as the ShopX website.
+const campaigns = [
+  { slug: "regalos-para-mama", title: "Regalos para mamá", image: "/campaigns/mama-2026-no-logo.webp" },
+  { slug: "marcas-que-queres", title: "Marcas que querés", image: "/campaigns/marcas-2026-no-logo.webp" },
+  { slug: "tu-proximo-upgrade", title: "Tu próximo upgrade", image: "/campaigns/upgrade-2026-no-logo.webp" },
+];
 
 const shortcuts = [
   { label: "Ropa", image: require("../../assets/images/home/gap.jpg"), category: "clothing" },
@@ -32,6 +44,7 @@ export default function HomeScreen() {
   const shellWidth = Math.min(width, 640);
   const cardWidth = (shellWidth - 44) / 2;
   const cartCount = useCartCount();
+  const [stores, setStores] = useState<ShopXStore[]>([]);
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [content, setContent] = useState<HomeContent>();
   const [products, setProducts] = useState<ShopXProduct[]>([]);
@@ -48,6 +61,10 @@ export default function HomeScreen() {
     setLoading(true);
     setRefreshing(force);
     setError("");
+    // Store discovery should not hold up product loading or pull-to-refresh.
+    void getOfficialStores().then((value) => {
+      if (id === generation.current) setStores([...value].sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999)));
+    });
     await Promise.allSettled([
       getWantItProducts(force).then((items) => { if (id === generation.current) setProducts(items); }).catch(() => {
         if (id === generation.current) setError("No pudimos cargar estos productos. Tocá para reintentar.");
@@ -139,12 +156,38 @@ export default function HomeScreen() {
               </LinearGradient>
             </TouchableOpacity>)}
           </View>
+          <View style={s.weekly}>
+            <View style={s.sectionHeader}>
+              <Text accessibilityRole="header" style={s.sectionTitle}>Comprá por tienda</Text>
+              <TouchableOpacity style={s.moreButton} accessibilityRole="button" accessibilityLabel="Ver todas las tiendas" onPress={() => router.push("/stores")}><Text style={s.more}>Ver todas</Text><Feather name="arrow-right" size={16} color="#087C91" /></TouchableOpacity>
+            </View>
+            <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.storeRail}>
+              {stores.map((store) => {
+                const localLogo = getStoreLogoSource(store.slug);
+                const source = localLogo || (canUseRemoteStoreLogo(store.logo) ? { uri: store.logo } : null);
+                return <TouchableOpacity key={store.slug} style={s.storeTile} accessibilityRole="button" accessibilityLabel={`Ver tienda ${store.name}`} onPress={() => router.push({ pathname: "/store/[slug]", params: { slug: store.slug } })}>
+                  <View style={s.storeLogoWrap}>{source ? <Image source={source} style={s.storeLogo} contentFit="contain" cachePolicy="memory-disk" /> : <Text style={s.storeWordmark} numberOfLines={2}>{getStoreLogoWordmark(store)}</Text>}</View>
+                  <Text style={s.storeName} numberOfLines={2}>{store.name}</Text>
+                </TouchableOpacity>;
+              })}
+            </ScrollView>
+          </View>
           {weeklyProducts.length > 0 ? <View style={s.weekly}>
             <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Lo más pedido</Text></View>
             <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail}>
               {weeklyProducts.map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
             </ScrollView>
           </View> : null}
+          <View style={s.weekly}>
+            <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Colecciones destacadas</Text></View>
+            <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.campaignRail} snapToInterval={Math.min(280, shellWidth - 64) + 12} decelerationRate="fast">
+              {campaigns.map((campaign) => <TouchableOpacity key={campaign.slug} style={[s.campaignCard, { width: Math.min(280, shellWidth - 64) }]} accessibilityRole="button" accessibilityLabel={`Explorar ${campaign.title}`} activeOpacity={0.9} onPress={() => {
+                void openBrowserAsync(buildApiUrl(`/colecciones/${campaign.slug}`)).catch(() => Alert.alert("No pudimos abrir la colección", "Volvé a intentar en unos segundos."));
+              }}>
+                <Image source={{ uri: buildApiUrl(campaign.image) }} style={s.campaignImage} contentFit="contain" cachePolicy="memory-disk" accessibilityLabel={campaign.title} />
+              </TouchableOpacity>)}
+            </ScrollView>
+          </View>
           {Object.entries(sectionLabels).map(([key, label]) => {
             const items = visibleStorefrontProducts(content?.sections?.[key] || []);
             if (!items.length) return null;
@@ -161,10 +204,9 @@ export default function HomeScreen() {
           {categories.length > 0 ? <View style={s.weekly}>
             <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Explorá por categoría</Text></View>
             <View style={s.categoryGrid}>
-              {categories.map((category) => <TouchableOpacity key={category.key} style={[s.catalogCategory, { width: (shellWidth - 44) / 2 }]} accessibilityRole="button" accessibilityLabel={`Ver ${category.label}`} onPress={() => router.push({ pathname: "/categories", params: { category: category.key, subcategory: "" } })}>
-                <Image source={{ uri: category.image }} style={s.catalogImage} contentFit="contain" cachePolicy="memory-disk" />
-                <Text style={s.catalogLabel}>{category.label}</Text>
-                <Feather name="arrow-right" size={17} color="#087C91" />
+              {categories.map((category) => <TouchableOpacity key={category.key} style={[s.catalogCategory, { width: (shellWidth - 56) / 4 }]} accessibilityRole="button" accessibilityLabel={`Ver ${category.label}`} onPress={() => router.push({ pathname: "/categories", params: { category: category.key, subcategory: "" } })}>
+                <View style={s.catalogImageWrap}><Image source={{ uri: category.image }} style={s.catalogImage} contentFit="contain" cachePolicy="memory-disk" /></View>
+                <Text style={s.catalogLabel} numberOfLines={2}>{category.label}</Text>
               </TouchableOpacity>)}
             </View>
           </View> : null}
@@ -203,11 +245,21 @@ const s = StyleSheet.create({
   moreButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 4 },
   more: { color: "#087C91", fontSize: 12, fontWeight: "600" },
   rail: { flexGrow: 0, flexShrink: 0 },
-  categoryGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 12 },
-  catalogCategory: { backgroundColor: "white", borderRadius: 16, borderWidth: 1, borderColor: "#E4EAF0", padding: 12, gap: 8 },
-  catalogImage: { width: "100%", height: 90 },
-  catalogLabel: { color: "#082A49", fontSize: 14, fontWeight: "700" },
+  categoryGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, columnGap: 8, rowGap: 14 },
+  catalogCategory: { alignItems: "center", gap: 6 },
+  catalogImageWrap: { width: 52, height: 52, borderRadius: 16, backgroundColor: "white", borderWidth: 1, borderColor: "#E4EAF0", padding: 6 },
+  catalogImage: { width: "100%", height: "100%" },
+  catalogLabel: { color: "#082A49", fontSize: 10, lineHeight: 13, fontWeight: "600", textAlign: "center", minHeight: 26 },
   productRail: { paddingHorizontal: 16, gap: 12, paddingBottom: 2, alignItems: "flex-start" },
+  storeRail: { paddingHorizontal: 16, gap: 10, alignItems: "flex-start" },
+  storeTile: { width: 84, alignItems: "center", gap: 6 },
+  storeLogoWrap: { width: 76, height: 64, padding: 10, borderRadius: 16, backgroundColor: "white", borderWidth: 1, borderColor: "#E4EAF0", alignItems: "center", justifyContent: "center" },
+  storeLogo: { width: "100%", height: "100%" },
+  storeWordmark: { color: "#082A49", fontSize: 14, fontWeight: "800", textAlign: "center" },
+  storeName: { color: "#082A49", fontSize: 11, lineHeight: 14, textAlign: "center" },
+  campaignRail: { paddingHorizontal: 16, gap: 12, alignItems: "flex-start" },
+  campaignCard: { aspectRatio: 1, borderRadius: 20, overflow: "hidden", backgroundColor: "#EEF4F7" },
+  campaignImage: { width: "100%", height: "100%" },
   brandHeader: { marginTop: 18 },
   sectionTitle: { fontSize: 21, fontWeight: "800", letterSpacing: -0.6, color: "#082A49", flex: 1 },
   brands: { flexDirection: "row", gap: 10, paddingHorizontal: 16 },
