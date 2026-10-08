@@ -1,4 +1,4 @@
-name: ShopX 1.4.0 Expo Go preview
+name: ShopX 1.4.0 Expo Go SDK 57 preview
 on:
   push:
     branches: ['preview/expo-go-1.4.0']
@@ -10,7 +10,7 @@ jobs:
     params:
       branch: expo-go-1.4.0
       platform: all
-      message: ShopX 1.4.0 - nuevo inicio ecommerce para probar en Expo Go
+      message: ShopX 1.4.0 - prueba compatible con Expo Go SDK 57
     hooks:
       before_update:
         - run: npm run typecheck && npm run test:parity

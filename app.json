@@ -3,7 +3,7 @@
     "name": "ShopX",
     "slug": "shopx",
     "version": "1.4.0",
-    "sdkVersion": "54.0.0",
+    "sdkVersion": "57.0.0",
     "runtimeVersion": { "policy": "sdkVersion" },
     "updates": {
       "url": "https://u.expo.dev/5281824e-479a-4a51-be7e-4993079396ea"
@@ -12,7 +12,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "shopxapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.maximodimnik.shopx",
@@ -30,7 +29,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -54,6 +52,8 @@
       "expo-web-browser",
       "expo-dev-client",
       "expo-font",
+      "expo-image",
+      "expo-status-bar",
       "expo-apple-authentication"
     ],
     "experiments": {
