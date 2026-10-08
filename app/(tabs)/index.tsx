@@ -91,8 +91,8 @@ export default function HomeScreen() {
           </View>
           <View style={s.search}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Buscar productos" style={s.searchButton} onPress={search}><Feather name="search" size={24} color="#082A49" /></TouchableOpacity>
-            <TextInput accessibilityLabel="¿Qué estás buscando?" value={query} onChangeText={setQuery} placeholder="¿Qué estás buscando?" placeholderTextColor="#718096"
-              style={s.input} returnKeyType="search" onSubmitEditing={search} autoCorrect={false} clearButtonMode="while-editing" />
+            <TextInput accessibilityLabel="Buscar Amazon, eBay, Walmart, Target" value={query} onChangeText={setQuery} placeholder="Buscar Amazon, eBay, Walmart, Target" placeholderTextColor="#718096"
+              style={[s.input, !query && { fontSize: shellWidth < 360 ? 11.5 : 13 }]} returnKeyType="search" onSubmitEditing={search} autoCorrect={false} clearButtonMode="while-editing" />
           </View>
           <TouchableOpacity style={s.location} accessibilityRole="button" accessibilityLabel={`Dirección de entrega. ${location}`} onPress={() => router.push("/profile")}>
             <Feather name="map-pin" size={17} color="#667992" /><Text style={s.locationText} numberOfLines={1}>Enviar a · {location}</Text><Feather name="chevron-right" size={16} color="#667992" />
@@ -145,16 +145,6 @@ export default function HomeScreen() {
               {weeklyProducts.map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
             </ScrollView>
           </View> : null}
-          {categories.length > 0 ? <View style={s.weekly}>
-            <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Explorá por categoría</Text></View>
-            <View style={s.categoryGrid}>
-              {categories.map((category) => <TouchableOpacity key={category.key} style={[s.catalogCategory, { width: (shellWidth - 44) / 2 }]} accessibilityRole="button" accessibilityLabel={`Ver ${category.label}`} onPress={() => router.push({ pathname: "/categories", params: { category: category.key, subcategory: "" } })}>
-                <Image source={{ uri: category.image }} style={s.catalogImage} contentFit="contain" cachePolicy="memory-disk" />
-                <Text style={s.catalogLabel}>{category.label}</Text>
-                <Feather name="arrow-right" size={17} color="#087C91" />
-              </TouchableOpacity>)}
-            </View>
-          </View> : null}
           {Object.entries(sectionLabels).map(([key, label]) => {
             const items = visibleStorefrontProducts(content?.sections?.[key] || []);
             if (!items.length) return null;
@@ -168,6 +158,16 @@ export default function HomeScreen() {
               </ScrollView>
             </View>;
           })}
+          {categories.length > 0 ? <View style={s.weekly}>
+            <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Explorá por categoría</Text></View>
+            <View style={s.categoryGrid}>
+              {categories.map((category) => <TouchableOpacity key={category.key} style={[s.catalogCategory, { width: (shellWidth - 44) / 2 }]} accessibilityRole="button" accessibilityLabel={`Ver ${category.label}`} onPress={() => router.push({ pathname: "/categories", params: { category: category.key, subcategory: "" } })}>
+                <Image source={{ uri: category.image }} style={s.catalogImage} contentFit="contain" cachePolicy="memory-disk" />
+                <Text style={s.catalogLabel}>{category.label}</Text>
+                <Feather name="arrow-right" size={17} color="#087C91" />
+              </TouchableOpacity>)}
+            </View>
+          </View> : null}
         </View>
       </ScrollView>
       <AppBottomNav />
