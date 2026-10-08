@@ -8,6 +8,7 @@ test("Native Google sign-in uses the SDK ID token and handles cancellation", asy
   let configuration;
   let result = { type: "success", data: { idToken: "synthetic-id-token" } };
   const native = load("lib/google-native.ts", {
+    "expo-constants": { __esModule: true, default: { executionEnvironment: "standalone" }, ExecutionEnvironment: { StoreClient: "storeClient" } },
     "./google-auth-config": {
       GOOGLE_AUTH_CONFIG: {
         webClientId: "web-client",
@@ -32,6 +33,15 @@ test("Native Google sign-in uses the SDK ID token and handles cancellation", asy
   assert.equal(await native.getNativeGoogleIdToken(), null);
   result = { type: "success", data: {} };
   await assert.rejects(native.getNativeGoogleIdToken(), /sesión válida/);
+});
+
+test("Expo Go explains native login limits without loading the unavailable Google module", async () => {
+  const native = load("lib/google-native.ts", {
+    "expo-constants": { __esModule: true, default: { executionEnvironment: "storeClient" }, ExecutionEnvironment: { StoreClient: "storeClient" } },
+    "./google-auth-config": { GOOGLE_AUTH_CONFIG: {} },
+  });
+  await assert.rejects(native.getNativeGoogleIdToken(), /En Expo Go ingresá con email/);
+  await native.clearNativeGoogleSession();
 });
 
 // Execute the actual portable app modules; only device storage/network are replaced.

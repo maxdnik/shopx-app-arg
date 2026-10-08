@@ -11,3 +11,6 @@ jobs:
       branch: expo-go-1.4.0
       platform: all
       message: ShopX 1.4.0 - nuevo inicio ecommerce para probar en Expo Go
+    hooks:
+      before_update:
+        - run: npm run typecheck && npm run test:parity
