@@ -3,6 +3,11 @@
     "name": "ShopX",
     "slug": "shopx",
     "version": "1.4.0",
+    "sdkVersion": "54.0.0",
+    "runtimeVersion": { "policy": "sdkVersion" },
+    "updates": {
+      "url": "https://u.expo.dev/5281824e-479a-4a51-be7e-4993079396ea"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shopxapp",

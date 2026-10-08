@@ -1,6 +1,6 @@
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { Platform } from "react-native";
 import { router } from "expo-router";
 import { buildApiUrl } from "./config";
@@ -160,6 +160,9 @@ async function savePushTokenToBackend(expoPushToken: string) {
 }
 
 export async function registerForPushNotificationsAsync(): Promise<PushRegistrationResult> {
+  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+    return { success: false, reason: "Las notificaciones push se prueban en la app instalada de ShopX, no en Expo Go." };
+  }
   try {
     await configureAndroidNotificationChannel();
 
