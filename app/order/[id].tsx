@@ -1,11 +1,15 @@
+import { listStatus, orderGroup, storedARS } from "../../lib/order-tracking/list-model";
+import { dateLabel, variantLabels } from "../../lib/order-tracking/view-model";
 import { OrderShipments } from "../../components/OrderShipments";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Image,
   Linking,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,7 +31,6 @@ const navy = "#062B4F";
 const navyDark = "#031A33";
 const text = "#071E35";
 const muted = "#718096";
-const accent = "#18C7D8";
 const soft = "#F7FAFC";
 const softCard = "#F1F5F9";
 const border = "#E2E8F0";
@@ -37,264 +40,20 @@ const greenSoft = "#E7FFF4";
 const orange = "#F59E0B";
 const orangeSoft = "#FFF7E6";
 const red = "#DC2626";
-const redSoft = "#FEF2F2";
 
-type OrderStatus =
-  | "pending_payment"
-  | "purchased"
-  | "miami"
-  | "traveling"
-  | "argentina"
-  | "delivered"
-  | "cancelled";
-
-const steps: { key: OrderStatus; label: string; icon: string }[] = [
-  { key: "purchased", label: "Comprado", icon: "check" },
-  { key: "miami", label: "Miami", icon: "home" },
-  { key: "traveling", label: "En viaje", icon: "navigation" },
-  { key: "argentina", label: "Argentina", icon: "map-pin" },
-  { key: "delivered", label: "Entregado", icon: "package" },
-];
-
-function normalizeStep(step?: string): OrderStatus | null {
-  const clean = String(step || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  if (clean === "pending_payment") return "pending_payment";
-  if (clean === "purchased" || clean === "paid") return "purchased";
-
-  if (
-    clean === "miami" ||
-    clean === "warehouse" ||
-    clean === "in_miami_warehouse" ||
-    clean === "received_miami"
-  ) {
-    return "miami";
-  }
-
-  if (clean === "traveling" || clean === "in_transit") {
-    return "traveling";
-  }
-
-  if (
-    clean === "shipped" ||
-    clean === "argentina" ||
-    clean === "customs" ||
-    clean === "local_delivery" ||
-    clean === "despachado" ||
-    clean === "enviado" ||
-    clean === "enviado correo local"
-  ) {
-    return "argentina";
-  }
-
-  if (clean === "delivered") return "delivered";
-  if (clean === "cancelled" || clean === "canceled") return "cancelled";
-
-  return null;
-}
-
-function getStepIndex(status: OrderStatus) {
-  if (status === "pending_payment" || status === "cancelled") return -1;
-
-  return steps.findIndex((step) => step.key === status);
-}
-
-function isDelivered(order: AppOrder) {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const status = String(order.status || "").toLowerCase();
-
-  return trackingStep === "delivered" || status === "delivered";
-}
-
-function isCancelled(order: AppOrder) {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  return (
-    trackingStep === "cancelled" ||
-    status === "cancelled" ||
-    status === "canceled" ||
-    paymentStatus === "rejected" ||
-    paymentStatus === "cancelled"
-  );
-}
-
-function isPendingPayment(order: AppOrder) {
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  return (
-    trackingStep === "pending_payment" ||
-    status === "pending_payment" ||
-    paymentStatus === "pending"
-  );
-}
-
-function getVisualStatus(order: AppOrder): OrderStatus {
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  if (status === "delivered") return "delivered";
-
-  if (status === "shipped") {
-    return "argentina";
-  }
-
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-
-  if (
-    trackingStep &&
-    trackingStep !== "pending_payment" &&
-    trackingStep !== "cancelled"
-  ) {
-    return trackingStep;
-  }
-
-  if (
-    status === "argentina" ||
-    status === "customs" ||
-    status === "local_delivery"
-  ) {
-    return "argentina";
-  }
-
-  if (status === "in_transit" || status === "traveling") {
-    return "traveling";
-  }
-
-  if (
-    status === "miami" ||
-    status === "warehouse" ||
-    status === "in_miami_warehouse"
-  ) {
-    return "miami";
-  }
-
-  if (
-    paymentStatus === "approved" ||
-    status === "paid" ||
-    status === "processing"
-  ) {
-    return "purchased";
-  }
-
-  return "purchased";
-}
-
-function getStatusLabel(order: AppOrder) {
-  const status = String(order.status || "").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "").toLowerCase();
-
-  if (status === "shipped") {
-    return "En Argentina";
-  }
-
-  if (order.tracking?.currentLabel) {
-    return order.tracking.currentLabel;
-  }
-
-  if (isCancelled(order)) return "Cancelado";
-  if (isDelivered(order)) return "Entregado";
-
-  if (paymentStatus === "approved" || status === "paid") {
-    return "Compra confirmada";
-  }
-
-  if (status === "processing") return "Compra en proceso";
-
-  if (
-    status === "in_miami_warehouse" ||
-    status === "miami" ||
-    status === "warehouse"
-  ) {
-    return "Recibido en Miami";
-  }
-
-  if (status === "in_transit" || status === "traveling") {
-    return "En viaje a Argentina";
-  }
-
-  if (status === "argentina" || status === "customs") {
-    return "En Argentina";
-  }
-
-  if (isPendingPayment(order)) return "Pago pendiente";
-
-  return "Pedido creado";
-}
-
-function getStatusDescription(order: AppOrder) {
-  const status = String(order.status || "").toLowerCase();
-
-  if (status === "shipped") {
-    return "El pedido ya está en Argentina y se encuentra en proceso de distribución. Próximamente será entregado.";
-  }
-
-  if (order.tracking?.currentDescription) {
-    return order.tracking.currentDescription;
-  }
-
-  if (isCancelled(order)) return "Este pedido fue cancelado.";
-  if (isDelivered(order)) return "Pedido entregado correctamente.";
-
-  if (isPendingPayment(order)) {
-    return "Tu pedido está pendiente de pago con Mercado Pago.";
-  }
-
-  if (
-    status === "in_miami_warehouse" ||
-    status === "miami" ||
-    status === "warehouse"
-  ) {
-    return "El producto fue recibido en Miami y está siendo preparado para consolidación.";
-  }
-
-  if (status === "in_transit" || status === "traveling") {
-    return "Tu compra está viajando hacia Argentina.";
-  }
-
-  if (status === "argentina" || status === "customs") {
-    return "Tu pedido está en proceso de ingreso y distribución local.";
-  }
-
-  return "ShopX está gestionando tu pedido y actualizando el seguimiento.";
-}
-
+function isCancelled(order: AppOrder) { return orderGroup(order) === "cancelled"; }
+function isPendingPayment(order: AppOrder) { return order.status === "pending_payment" && !isCancelled(order); }
+function getStatusLabel(order: AppOrder) { return listStatus(order).label; }
+function getStatusDescription(order: AppOrder) { return listStatus(order).description; }
 function getStatusStyle(order: AppOrder) {
-  if (isDelivered(order)) {
-    return {
-      bg: greenSoft,
-      color: green,
-      label: "ENTREGADO",
-    };
-  }
-
-  if (isCancelled(order)) {
-    return {
-      bg: redSoft,
-      color: red,
-      label: "CANCELADO",
-    };
-  }
-
-  if (isPendingPayment(order)) {
-    return {
-      bg: orangeSoft,
-      color: orange,
-      label: "PENDIENTE",
-    };
-  }
-
-  return {
-    bg: greenSoft,
-    color: green,
-    label: "ACTIVO",
+  const { tone, label } = listStatus(order);
+  const colors = {
+    blue: { bg: softCard, color: navy },
+    green: { bg: greenSoft, color: green },
+    amber: { bg: orangeSoft, color: "#92400E" },
+    muted: { bg: softCard, color: muted },
   };
+  return { ...colors[tone], label };
 }
 
 function getPaymentReturnBanner(payment?: string | string[]) {
@@ -331,53 +90,19 @@ function getPaymentReturnBanner(payment?: string | string[]) {
   return null;
 }
 
-function formatDate(value?: string) {
-  if (!value) return "Sin fecha";
-
-  try {
-    const date = new Date(value);
-
-    return new Intl.DateTimeFormat("es-AR", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(date);
-  } catch {
-    return "Sin fecha";
-  }
-}
+function formatDate(value?: string) { return dateLabel(value) || "Sin fecha"; }
 
 function formatARS(value?: number) {
   const amount = Number(value || 0);
 
-  if (!Number.isFinite(amount) || amount <= 0) {
+  if (!Number.isFinite(amount) || value === undefined) {
     return "ARS pendiente";
   }
 
   return `ARS ${Math.round(amount).toLocaleString("es-AR")}`;
 }
 
-function getOrderTotalARS(order: AppOrder) {
-  const totalARS = Number((order as any).totalARS || 0);
-
-  if (Number.isFinite(totalARS) && totalARS > 0) {
-    return totalARS;
-  }
-
-  const totalUSD = Number(order.totalUSD || 0);
-  const exchangeRateUsed = Number(order.exchangeRateUsed || 0);
-
-  if (
-    Number.isFinite(totalUSD) &&
-    totalUSD > 0 &&
-    Number.isFinite(exchangeRateUsed) &&
-    exchangeRateUsed > 0
-  ) {
-    return totalUSD * exchangeRateUsed;
-  }
-
-  return 0;
-}
+function getOrderTotalARS(order: AppOrder) { return storedARS(order); }
 
 function getItemUnitPriceUSD(item: any) {
   const value =
@@ -441,131 +166,6 @@ function getItemBrand(item: any) {
     .toUpperCase();
 }
 
-function getNextStepContent(order: AppOrder) {
-  const visualStatus = getVisualStatus(order);
-
-  if (isCancelled(order)) {
-    return {
-      icon: "alert-circle-outline",
-      title: "Pedido cancelado",
-      text: "Este pedido figura cancelado. Si creés que es un error, podés consultar con soporte.",
-    };
-  }
-
-  if (isPendingPayment(order)) {
-    return {
-      icon: "credit-card-outline",
-      title: "Próximo paso: completar el pago",
-      text: "Apenas se confirme el pago, ShopX avanza con la gestión de compra y seguimiento.",
-    };
-  }
-
-  if (visualStatus === "purchased") {
-    return {
-      icon: "shopping-outline",
-      title: "Próximo paso: recepción en Miami",
-      text: "Estamos gestionando la compra en USA. Te avisamos cuando llegue a nuestro depósito en Miami.",
-    };
-  }
-
-  if (visualStatus === "miami") {
-    return {
-      icon: "warehouse",
-      title: "Próximo paso: salida a Argentina",
-      text: "Tu producto está en Miami. Estamos preparando la consolidación y el envío internacional.",
-    };
-  }
-
-  if (visualStatus === "traveling") {
-    return {
-      icon: "airplane",
-      title: "Próximo paso: ingreso a Argentina",
-      text: "Tu pedido está viajando. Te vamos a avisar cuando entre al circuito local.",
-    };
-  }
-
-  if (visualStatus === "argentina") {
-    return {
-      icon: "truck-delivery-outline",
-      title: "Próximo paso: entrega local",
-      text: "Tu pedido ya está en Argentina y avanza hacia la entrega puerta a puerta.",
-    };
-  }
-
-  if (visualStatus === "delivered") {
-    return {
-      icon: "check-decagram-outline",
-      title: "Pedido entregado",
-      text: "Tu compra fue entregada. Gracias por confiar en ShopX.",
-    };
-  }
-
-  return {
-    icon: "progress-clock",
-    title: "Seguimiento activo",
-    text: "ShopX está actualizando el estado del pedido hasta la entrega.",
-  };
-}
-
-function getPrimaryAction(order: AppOrder) {
-  if (isPendingPayment(order)) {
-    return "Pagar ahora";
-  }
-
-  if (isDelivered(order)) {
-    return "Ver productos";
-  }
-
-  return "Actualizar pedido";
-}
-
-function OrderProgress({ status }: { status: OrderStatus }) {
-  const currentIndex = getStepIndex(status);
-
-  return (
-    <View style={styles.progressWrap}>
-      {steps.map((step, index) => {
-        const completed = currentIndex >= 0 && index <= currentIndex;
-        const isLast = index === steps.length - 1;
-
-        return (
-          <View key={step.key} style={styles.stepBlock}>
-            <View style={styles.stepTop}>
-              <View
-                style={[styles.stepCircle, completed && styles.stepCircleDone]}
-              >
-                <Feather
-                  name={completed ? "check" : (step.icon as any)}
-                  size={completed ? 16 : 15}
-                  color={completed ? white : "#AAB6C8"}
-                />
-              </View>
-
-              {!isLast ? (
-                <View style={styles.stepLineWrap}>
-                  <View
-                    style={[
-                      styles.stepLine,
-                      index < currentIndex && styles.stepLineDone,
-                    ]}
-                  />
-                </View>
-              ) : null}
-            </View>
-
-            <Text
-              style={[styles.stepLabel, completed && styles.stepLabelDone]}
-              numberOfLines={1}
-            >
-              {step.label}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
 export default function OrderDetailScreen() {
   const { id, payment } = useLocalSearchParams<{
     id: string;
@@ -575,58 +175,36 @@ export default function OrderDetailScreen() {
   const [user, setUser] = useState<ShopXUser | null>(null);
   const [order, setOrder] = useState<AppOrder | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshingAfterPayment, setRefreshingAfterPayment] = useState(false);
+  const [refreshingAfterPayment, setRefreshingAfterPayment] = useState(Boolean(payment));
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+  const requestVersion = useRef(0);
 
   const paymentBanner = getPaymentReturnBanner(payment);
 
-  async function loadOrder(options?: { silent?: boolean }) {
-    if (!options?.silent) {
-      setLoading(true);
-    }
-
-    const orderId = String(id || "");
-
-    if (!orderId) {
-      setLoading(false);
-      return;
-    }
-
-    const storedUser = await getStoredUser();
-    const freshUser = storedUser || (await fetchCurrentUser());
-
-    if (!freshUser) {
-      setUser(null);
-      setOrder(null);
-      setLoading(false);
-      setRefreshingAfterPayment(false);
-      return;
-    }
-
-    setUser(freshUser);
-
+  const loadOrder = useCallback(async (options?: { silent?: boolean }) => {
+    const version = ++requestVersion.current;
+    if (!options?.silent) { setLoading(true); setOrder(null); }
+    setRefreshError("");
     try {
-      const data = await getAppOrderById({
-        orderId,
-        email: freshUser.email,
-        phone: freshUser.phone,
-      });
-
-      setOrder(data);
+      const orderId = String(id || "");
+      if (!orderId) return;
+      const storedUser = await getStoredUser();
+      const freshUser = storedUser || (await fetchCurrentUser());
+      if (version !== requestVersion.current) return;
+      setUser(freshUser);
+      if (!freshUser) { setOrder(null); return; }
+      const data = await getAppOrderById({ orderId, email: freshUser.email, phone: freshUser.phone });
+      if (version === requestVersion.current) setOrder(data);
     } catch (error: any) {
-      console.log("ERROR ORDER DETAIL:", error);
-
-      if (!options?.silent) {
-        Alert.alert(
-          "No pudimos cargar el pedido",
-          error?.message || "Intentá nuevamente.",
-        );
-      }
+      if (version === requestVersion.current) setRefreshError(error?.message || "No pudimos actualizar el pedido. Intentá nuevamente.");
     } finally {
-      setLoading(false);
-      setRefreshingAfterPayment(false);
+      if (version === requestVersion.current) {
+        setLoading(false); setRefreshingAfterPayment(false); setRefreshing(false);
+      }
     }
-  }
+  }, [id]);
 
   async function handlePayPendingOrder() {
     if (!order || !user || checkoutLoading) return;
@@ -663,16 +241,21 @@ export default function OrderDetailScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadOrder();
-    }, [id]),
+      void loadOrder();
+      const refresh = () => {
+        if (AppState.currentState === "active") void loadOrder({ silent: true });
+      };
+      const interval = setInterval(refresh, 60000);
+      const subscription = AppState.addEventListener("change", state => { if (state === "active") refresh(); });
+      return () => { clearInterval(interval); subscription.remove(); requestVersion.current += 1; };
+    }, [loadOrder]),
   );
 
   useEffect(() => {
     if (!payment) return;
 
-    setRefreshingAfterPayment(true);
-
     const timerOne = setTimeout(() => {
+      setRefreshingAfterPayment(true);
       loadOrder({ silent: true });
     }, 1800);
 
@@ -684,7 +267,7 @@ export default function OrderDetailScreen() {
       clearTimeout(timerOne);
       clearTimeout(timerTwo);
     };
-  }, [payment, id]);
+  }, [payment, loadOrder]);
 
   if (loading) {
     return (
@@ -775,7 +358,7 @@ export default function OrderDetailScreen() {
 
             <Text style={styles.loginTitle}>Pedido no encontrado</Text>
             <Text style={styles.loginText}>
-              No pudimos encontrar este pedido o no está asociado a tu cuenta.
+              {refreshError || "No pudimos encontrar este pedido o no está asociado a tu cuenta."}
             </Text>
 
             <TouchableOpacity
@@ -792,16 +375,12 @@ export default function OrderDetailScreen() {
   }
 
   const statusStyle = getStatusStyle(order);
-  const visualStatus = getVisualStatus(order);
-  const trackingHistory = Array.isArray(order.tracking?.history)
-    ? order.tracking.history
-    : [];
   const totalARS = getOrderTotalARS(order);
-  const nextStep = getNextStepContent(order);
 
   return (
     <View style={styles.app}>
       <ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void loadOrder({ silent: true }); }} tintColor={navy} />}
         style={styles.screen}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -951,84 +530,13 @@ export default function OrderDetailScreen() {
           </View>
         ) : null}
 
-        <View style={styles.progressCard}>
-          <Text style={styles.sectionTitle}>Seguimiento</Text>
-          <Text style={styles.sectionSubtitle}>
-            Estado actualizado por ShopX desde compra hasta entrega.
-          </Text>
-
-          <OrderProgress status={visualStatus} />
-        </View>
-
-        <View style={styles.nextStepCard}>
-          <View style={styles.nextStepIcon}>
-            <MaterialCommunityIcons
-              name={nextStep.icon as any}
-              size={27}
-              color={navy}
-            />
-          </View>
-
-          <View style={styles.nextStepContent}>
-            <Text style={styles.nextStepTitle}>{nextStep.title}</Text>
-            <Text style={styles.nextStepText}>{nextStep.text}</Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.nextStepButton}
-            activeOpacity={0.88}
-            onPress={() => {
-              if (isPendingPayment(order)) {
-                handlePayPendingOrder();
-                return;
-              }
-
-              if (isDelivered(order)) {
-                router.push("/");
-                return;
-              }
-
-              loadOrder({ silent: true });
-            }}
-            disabled={checkoutLoading}
-          >
-            <Text style={styles.nextStepButtonText}>
-              {getPrimaryAction(order)}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {trackingHistory.length > 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Historial de tracking</Text>
-
-            <View style={styles.timelineList}>
-              {trackingHistory
-                .slice()
-                .reverse()
-                .map((event: any, index: number) => (
-                  <View
-                    key={`${event.step}-${event.date}-${index}`}
-                    style={styles.timelineItem}
-                  >
-                    <View style={styles.timelineDot} />
-
-                    <View style={styles.timelineContent}>
-                      <Text style={styles.timelineLabel}>
-                        {event.label || "Actualización ShopX"}
-                      </Text>
-                      <Text style={styles.timelineDescription}>
-                        {event.description || "Seguimiento actualizado."}
-                      </Text>
-                      <Text style={styles.timelineDate}>
-                        {formatDate(event.date)}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-            </View>
-          </View>
-        ) : null}
+        {refreshError ? <Text accessibilityRole="alert" style={{ color: red, margin: 18 }}>{refreshError}</Text> : null}
+        <OrderShipments
+          key={order._id}
+          order={order}
+          refreshing={refreshing}
+          onRefresh={() => { setRefreshing(true); void loadOrder({ silent: true }); }}
+        />
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Productos</Text>
@@ -1066,6 +574,7 @@ export default function OrderDetailScreen() {
                       {item.title || "Producto ShopX"}
                     </Text>
 
+                    {variantLabels(item.selections).map(label => <Text key={label} style={styles.itemMeta}>{label}</Text>)}
                     <View style={styles.itemMetaRow}>
                       <Text style={styles.itemMeta}>Cantidad: {quantity}</Text>
                       <Text style={styles.itemMeta}>Importe del producto</Text>
@@ -1122,7 +631,7 @@ export default function OrderDetailScreen() {
 
             <View style={styles.totalAmountBlock}>
               <Text style={styles.totalAmount}>
-                {totalARS > 0
+                {totalARS !== null
                   ? formatARS(totalARS)
                   : `USD ${formatUSD(order.totalUSD)}`}
               </Text>
@@ -1158,7 +667,7 @@ export default function OrderDetailScreen() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Destino</Text>
             <Text style={styles.infoValue}>
-              {order.buyer?.city || "A confirmar"}
+              {[order.buyer?.address, order.buyer?.city, order.buyer?.province, order.buyer?.postalCode].filter(Boolean).join(" · ") || "A confirmar"}
             </Text>
           </View>
 
@@ -1196,7 +705,6 @@ export default function OrderDetailScreen() {
         </View>
 
         <View style={{ height: 132 }} />
-        <OrderShipments order={order} />
       </ScrollView>
 
       <AppBottomNav />
@@ -1331,6 +839,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
+    flexWrap: "wrap",
   },
   orderEyebrow: {
     color: "rgba(255,255,255,0.58)",
@@ -1347,7 +856,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.8,
   },
   statusPill: {
-    height: 32,
+    minHeight: 32,
+    maxWidth: "100%",
+    paddingVertical: 7,
     borderRadius: 999,
     paddingHorizontal: 13,
     alignItems: "center",
@@ -1394,13 +905,6 @@ const styles = StyleSheet.create({
     color: white,
     fontSize: 15,
     fontWeight: "900",
-  },
-  heroMetaSubValue: {
-    marginTop: 2,
-    color: "rgba(255,255,255,0.62)",
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: "800",
   },
   heroMetaTotalBlock: {
     flex: 1,
@@ -1459,136 +963,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
   },
-
-  nextStepCard: {
-    marginHorizontal: 18,
-    marginTop: 14,
-    borderRadius: 28,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
-  nextStepIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 20,
-    backgroundColor: "#EAFBFD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  nextStepContent: {
-    flex: 1,
-  },
-  nextStepTitle: {
-    color: text,
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: "900",
-  },
-  nextStepText: {
-    marginTop: 3,
-    color: muted,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "600",
-  },
-  nextStepButton: {
-    minHeight: 40,
-    borderRadius: 999,
-    backgroundColor: navy,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  nextStepButtonText: {
-    color: white,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-
-  progressCard: {
-    marginHorizontal: 18,
-    marginTop: 14,
-    borderRadius: 28,
-    backgroundColor: white,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 18,
-    shadowColor: navy,
-    shadowOpacity: 0.045,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
   sectionTitle: {
     color: text,
     fontSize: 21,
     lineHeight: 27,
     fontWeight: "900",
     letterSpacing: -0.4,
-  },
-  sectionSubtitle: {
-    marginTop: 4,
-    color: muted,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-  },
-
-  progressWrap: {
-    marginTop: 22,
-    flexDirection: "row",
-  },
-  stepBlock: {
-    flex: 1,
-  },
-  stepTop: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  stepCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: white,
-    borderWidth: 2,
-    borderColor: border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepCircleDone: {
-    backgroundColor: accent,
-    borderColor: accent,
-  },
-  stepLineWrap: {
-    flex: 1,
-    height: 3,
-    backgroundColor: border,
-  },
-  stepLine: {
-    height: 3,
-    backgroundColor: border,
-  },
-  stepLineDone: {
-    backgroundColor: accent,
-  },
-  stepLabel: {
-    marginTop: 7,
-    color: "#A0ABBC",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  stepLabelDone: {
-    color: text,
   },
 
   card: {
@@ -1604,46 +984,6 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
-  },
-
-  timelineList: {
-    marginTop: 16,
-    gap: 14,
-  },
-  timelineItem: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  timelineDot: {
-    marginTop: 5,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: accent,
-  },
-  timelineContent: {
-    flex: 1,
-  },
-  timelineLabel: {
-    color: text,
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "900",
-  },
-  timelineDescription: {
-    marginTop: 3,
-    color: muted,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-  },
-  timelineDate: {
-    marginTop: 4,
-    color: "#9AA6B8",
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: "800",
-    letterSpacing: 0.6,
   },
 
   itemsList: {
@@ -1741,23 +1081,11 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     fontWeight: "700",
   },
-  breakdownAmountBlock: {
-    flex: 1.05,
-    alignItems: "flex-end",
-  },
   breakdownAmount: {
     color: text,
     fontSize: 14,
     lineHeight: 19,
     fontWeight: "900",
-    textAlign: "right",
-  },
-  breakdownAmountUSD: {
-    marginTop: 2,
-    color: "#9AA6B8",
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: "800",
     textAlign: "right",
   },
   totalDivider: {

@@ -395,3 +395,144 @@ test("The want-it collection retries failures, preserves editorial order and ded
   await store.getWantItProducts(true);
   assert.equal(calls, 3);
 });
+
+function trackingOrder(overrides = {}) {
+  return {
+    _id: "synthetic-tracking-order", orderNumber: "TEST-TRACKING", status: "paid",
+    paymentStatus: "approved", totalUSD: 125, itemsCount: 1,
+    items: [{ title: "Producto de prueba", qty: 1, priceUSD: 100 }],
+    delivery: { rows: [], purchases: [{ purchased: false, at: null }], paidARS: null, estimatedMiamiAt: null },
+    ...overrides,
+  };
+}
+function inboundRow(overrides = {}) {
+  return { key: "package-1", itemIndex: 0, title: "Producto de prueba", store: "Amazon",
+    carrier: "UPS", number: "1Z1234567890", url: "", status: "ordered",
+    eta: null, etaEnd: null, deliveredAt: null, eventAt: null, checkedAt: null,
+    confirmedMiami: false, review: false, refunded: false, direct: false, ...overrides };
+}
+
+test("Tracking separates payment, purchase, USA transit and warehouse reception", () => {
+  const { stageOf, purchaseComplete, shipmentLabel } = load("lib/order-tracking/view-model.ts");
+  const order = trackingOrder();
+  assert.equal(stageOf(order), 0);
+  assert.equal(purchaseComplete(order), false);
+  order.delivery.purchases[0] = { purchased: true, at: "2026-10-01T15:00:00Z" };
+  assert.equal(stageOf(order), 1);
+  const row = inboundRow({ status: "delivered" });
+  order.delivery.rows = [row];
+  assert.equal(stageOf(order), 2, "A USA delivered scan is not warehouse or customer delivery");
+  assert.equal(shipmentLabel(row), "Entrega informada por transportista");
+  row.confirmedMiami = true;
+  assert.equal(shipmentLabel(row), "Entregado a Fast Track");
+  assert.equal(stageOf(order), 2, "A per-package receipt must not advance the entire order");
+  order.status = "in_miami_warehouse";
+  assert.equal(stageOf(order), 3);
+});
+
+test("Current order status wins over stale labels, payments and old tracking milestones", () => {
+  const { stageOf } = load("lib/order-tracking/view-model.ts");
+  const { listStatus, orderGroup } = load("lib/order-tracking/list-model.ts");
+  for (const [status, stage, label] of [
+    ["in_miami_warehouse", 3, "En depósito Miami"], ["in_transit", 4, "En tránsito a Argentina"],
+    ["arrived_argentina", 5, "Arribado a Argentina"], ["arrived_in_argentina", 5, "Arribado a Argentina"],
+    ["shipped", 6, "En entrega local"], ["delivered", 7, "Entregado"], ["cancelled", -1, "Cancelado"],
+  ]) {
+    const order = trackingOrder({ status, paymentStatus: "pending", tracking: { currentStep: "purchased", currentLabel: "Pago pendiente" } });
+    assert.equal(stageOf(order), stage);
+    assert.equal(listStatus(order).label, label);
+  }
+  const delivered = trackingOrder({ status: "delivered", paymentStatus: "refunded" });
+  assert.equal(orderGroup(delivered), "cancelled");
+  assert.equal(listStatus(delivered).label, "Reembolsado");
+  assert.equal(listStatus(trackingOrder({ status: "incident" })).label, "En revisión");
+});
+
+test("Payment regression recovery respects corrections and complete partial coverage", () => {
+  const { resolveOrderStatus } = load("lib/order-tracking/order-status.ts");
+  const order = trackingOrder({ tracking: { currentStep: "argentina", history: [{ status: "arrived_argentina" }] } });
+  assert.equal(resolveOrderStatus(order), "arrived_argentina");
+  order.tracking.history.push({ status: "processing" });
+  assert.equal(resolveOrderStatus(order), "paid", "An explicit backwards correction is preserved");
+  order.tracking.history = [{ status: "arrived_argentina" }];
+  order.items.push({ title: "Segundo producto", qty: 1, priceUSD: 10 });
+  order.partialShipments = [{ id: "a", itemIndexes: [0], status: "arrived_argentina" }];
+  assert.equal(resolveOrderStatus(order), "paid", "An uncovered item cannot be considered delivered");
+  order.partialShipments.push({ id: "b", itemIndexes: [1], status: "in_transit" });
+  assert.equal(resolveOrderStatus(order), "paid");
+  order.partialShipments[1].status = "arrived_argentina";
+  assert.equal(resolveOrderStatus(order), "arrived_argentina");
+  order.paymentStatus = "refunded";
+  assert.equal(resolveOrderStatus(order), "paid", "A refund cannot revive shipment progress");
+});
+
+test("Partial shipments, direct routes and review flags do not invent a Miami arrival", () => {
+  const { stageOf, isDirectOrder, validInbound } = load("lib/order-tracking/view-model.ts");
+  const { listStatus, miniProgress } = load("lib/order-tracking/list-model.ts");
+  const order = trackingOrder();
+  order.delivery.rows = [inboundRow({ status: "in_transit" })];
+  order.partialShipments = [{ id: "a", sequence: 1, status: "in_transit", itemIndexes: [0] }];
+  assert.equal(stageOf(order), 1, "Product bought, without promoting the whole partial order to transit");
+  order.partialShipments = [];
+  order.delivery.rows[0].direct = true;
+  assert.equal(isDirectOrder(order), true);
+  assert.equal(stageOf(order), 0);
+  assert.equal(miniProgress(order).some(step => /Miami/.test(step.label)), false);
+  assert.equal(listStatus(order).label, "Envío directo a Argentina");
+  order.delivery.rows[0].review = true;
+  assert.equal(isDirectOrder(order), false);
+  assert.equal(validInbound(order.delivery.rows[0]), false);
+  assert.equal(listStatus(order).label, "Seguimiento en revisión");
+});
+
+test("Local tracking retains package scopes, removes duplicate general references and never infers dispatch from a number", () => {
+  const { localDeliveryRows } = load("lib/order-tracking/detail-shipping.ts");
+  const order = trackingOrder({ status: "arrived_argentina", localTrackingNumber: "PA123456789AR", localCourierName: "Correo Argentino" });
+  let [row] = localDeliveryRows(order);
+  assert.equal(row.dispatchedAt, null);
+  assert.equal(row.deliveredAt, null);
+  order.partialShipments = [{ id: "lot-a", sequence: 1, code: "A", itemIndexes: [0], status: "shipped", localTrackingNumber: "PA123456789AR", localCourierName: "Correo Argentino", history: [{ status: "shipped", date: "2026-10-08T18:12:00Z" }] }];
+  const rows = localDeliveryRows(order);
+  assert.equal(rows.length, 1);
+  [row] = rows;
+  assert.equal(row.key, "partial:lot-a");
+  assert.equal(row.dispatchedAt, "2026-10-08T18:12:00.000Z");
+  assert.equal(row.deliveredAt, null);
+  assert.deepEqual(row.products, ["1 × Producto de prueba"]);
+  order.partialShipments[0].localTrackingNumber = "PA987654321AR";
+  assert.equal(localDeliveryRows(order).length, 2, "Distinct order and lot references stay separate");
+});
+
+test("Correo Argentino tracking hides replaced identities and keeps valid history after sync errors", () => {
+  const { customerLocalTracking, correoTrackingNumber } = load("lib/order-tracking/local-tracking.ts");
+  const tracking = { provider: "correo_argentino", trackingNumber: "PA123456789AR", lastError: "timeout",
+    events: [{ date: "2026-10-09T12:00:00Z", branch: "Buenos Aires", event: "En distribución", status: "En camino" }, { date: "invalid", event: "Bad date" }] };
+  assert.equal(customerLocalTracking(tracking, "PA987654321AR", "Correo Argentino"), null);
+  assert.equal(customerLocalTracking(tracking, "PA123456789AR", "Otro correo"), null);
+  const result = customerLocalTracking(tracking, "PA123456789AR", "Correo Argentino");
+  assert.equal(result.events.length, 1);
+  assert.equal(result.lastError, "timeout");
+  assert.equal(correoTrackingNumber("123456789"), null, "Never invent a product prefix");
+});
+
+test("Local dates are registered Argentina times, not order edits or USA scans", () => {
+  const { localRegistrationDate } = load("lib/order-tracking/local-registration.ts");
+  const { currentShipmentState, localDeliveryRows } = load("lib/order-tracking/detail-shipping.ts");
+  assert.equal(localRegistrationDate("2026-10-08T18:12:00Z"), "08/10/2026 · 15:12 hs (Argentina)");
+  assert.equal(localRegistrationDate("invalid"), "");
+  const order = trackingOrder({ status: "shipped", updatedAt: "2026-10-09T12:00:00Z", localTrackingNumber: "ABC123", tracking: { miamiAt: "2026-10-01T12:00:00Z" } });
+  assert.equal(currentShipmentState(order).label, "En entrega local");
+  assert.equal(currentShipmentState(order).at, null);
+  assert.equal(localDeliveryRows(order)[0].dispatchedAt, null);
+});
+
+test("Only public carrier links are built and unknown prices or arrival dates stay unknown", () => {
+  const { publicTrackingUrl, etaHint } = load("lib/order-tracking/view-model.ts");
+  const { storedARS, orderMilestone } = load("lib/order-tracking/list-model.ts");
+  assert.equal(publicTrackingUrl("Amazon", "123456789"), "");
+  assert.equal(publicTrackingUrl("UPS", "javascript:alert(1)"), "");
+  assert.match(publicTrackingUrl("FedEx", "123456789"), /^https:\/\/www\.fedex\.com\//);
+  assert.equal(storedARS(trackingOrder({ totalARS: 0, exchangeRateUsed: 1500 })), null);
+  assert.equal(orderMilestone(trackingOrder()).value, "Por confirmar");
+  assert.match(etaHint("2026-10-01T12:00:00Z", null, new Date("2026-10-09T12:00:00Z")), /vencida/);
+});
