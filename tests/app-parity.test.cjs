@@ -8,6 +8,7 @@ test("Native Google sign-in uses the SDK ID token and handles cancellation", asy
   let configuration;
   let result = { type: "success", data: { idToken: "synthetic-id-token" } };
   const native = load("lib/google-native.ts", {
+    "expo-constants": { __esModule: true, default: { executionEnvironment: "standalone" }, ExecutionEnvironment: { StoreClient: "storeClient" } },
     "./google-auth-config": {
       GOOGLE_AUTH_CONFIG: {
         webClientId: "web-client",
@@ -32,6 +33,15 @@ test("Native Google sign-in uses the SDK ID token and handles cancellation", asy
   assert.equal(await native.getNativeGoogleIdToken(), null);
   result = { type: "success", data: {} };
   await assert.rejects(native.getNativeGoogleIdToken(), /sesión válida/);
+});
+
+test("Expo Go explains native login limits without loading the unavailable Google module", async () => {
+  const native = load("lib/google-native.ts", {
+    "expo-constants": { __esModule: true, default: { executionEnvironment: "storeClient" }, ExecutionEnvironment: { StoreClient: "storeClient" } },
+    "./google-auth-config": { GOOGLE_AUTH_CONFIG: {} },
+  });
+  await assert.rejects(native.getNativeGoogleIdToken(), /En Expo Go ingresá con email/);
+  await native.clearNativeGoogleSession();
 });
 
 // Execute the actual portable app modules; only device storage/network are replaced.
@@ -205,6 +215,131 @@ test("Quote basket preserves retailer selections and base price without inventin
   assert.deepEqual(product.selectedOptions, { Color: "Blue", Talle: "M" });
 });
 
+test("Quote URLs follow website identities, preserve variants and validate basket limits", () => {
+  const quote = load("lib/quote-basket.ts", { "./request": {} });
+  const retailers = load("lib/quote-retailers.ts");
+  const amazon = "https://www.amazon.com/title/dp/B012345678?tag=tracking&qty=2";
+  assert.equal(quote.canonicalQuoteUrl(amazon), "https://www.amazon.com/dp/B012345678?quantity=2");
+  assert.equal(quote.canonicalQuoteUrl("https://www.ebay.com/itm/title/123456789012?var=9876543210&utm_source=x"), "https://www.ebay.com/itm/123456789012?var=9876543210");
+  assert.equal(quote.canonicalQuoteUrl("https://www.sephora.com/product/item-P12345?sku=345678&utm_source=x"), "https://www.sephora.com/product/item-P12345?skuId=345678");
+  assert.notEqual(retailers.retailerProductKey("https://www.target.com/p/item/-/A-12345678?preselect=23456789"), retailers.retailerProductKey("https://www.target.com/p/item/-/A-12345678?preselect=34567890"));
+  assert.throws(() => quote.quoteLinks(`${amazon}\nhttps://amazon.com/gp/product/B012345678?quantity=3`), /ya está incluido/);
+  assert.throws(() => quote.quoteLinks(`${amazon}\nhttps://www.ebay.com/itm/123456789012\nhttps://www.target.com/p/item/-/A-12345678`), /dos tiendas/);
+  assert.equal(quote.quoteLinks("https://www.ebay.com/itm/123456789012?var=111\nhttps://www.ebay.com/itm/123456789012?var=222").length, 2);
+  assert.equal(quote.supportsAutomaticQuote("https://www.amazon.com.attacker.test/item"), false);
+});
+
+test("Automatic quote uses web timeout and preserves retailer errors for the correct fallback", async () => {
+  class ApiError extends Error { constructor(message, status, data = {}) { super(message); this.status = status; this.data = data; } }
+  let response = { products: [{ id: "a" }], cartItems: [{}], pricing: { totalFinal: 12 } };
+  let failure;
+  let called;
+  const quote = load("lib/quote-basket.ts", { "./request": { ApiError, request: async (path, options) => { called = { path, options }; if (failure) throw failure; return response; } } });
+  const url = "https://www.bestbuy.com/site/item/6302559.p";
+  const destination = { province: "CABA", city: "Buenos Aires", postalCode: "1425" };
+  const signal = new AbortController().signal;
+  assert.equal(await quote.calculateQuoteBasket([url], destination, signal), response);
+  assert.equal(called.path, "/api/amazon-quote-batch");
+  assert.equal(called.options.timeoutMs, 25000);
+  assert.deepEqual(called.options.body.destination, destination);
+  assert.equal(called.options.signal, signal);
+  failure = new ApiError("generic", 422, { errors: [{ error: "Best Buy no devolvió una ficha válida", reason: "not_found" }] });
+  await assert.rejects(quote.calculateQuoteBasket([url]), /Best Buy no devolvió/);
+  assert.equal(quote.shouldRouteToManualQuote([url], failure.data.errors[0].error), true);
+  const amazon = "https://www.amazon.com/dp/B012345678";
+  assert.equal(quote.shouldRouteToManualQuote([amazon], "No pudimos leer el producto"), false);
+  assert.equal(quote.shouldRouteToManualQuote([amazon, url], "No pudimos leer el producto"), false);
+  assert.equal(quote.shouldRouteToManualQuote([amazon], "Faltan dimensiones del embalaje"), true);
+  assert.equal(quote.shouldRouteToManualQuote([url], "El producto figura sin stock"), false);
+  failure = new ApiError("timeout", 408);
+  await assert.rejects(quote.calculateQuoteBasket([url]), /conservamos tus links/);
+  failure = undefined;
+  response = { ok: true, products: [], errors: [{ error: "No pudimos leer el producto" }] };
+  await assert.rejects(quote.calculateQuoteBasket([url]), /No pudimos leer/);
+});
+
+test("Partial quote results can be repaired by product identity and cannot be checked out", () => {
+  const quote = load("lib/quote-basket.ts", { "./request": {} });
+  const first = "https://www.amazon.com/dp/B012345678";
+  const second = "https://www.amazon.com/dp/B012345679";
+  const product = { id: "second", sourceUrl: second, quantity: 1 };
+  const changed = quote.changeQuotedQuantity([first, second], product, 2);
+  assert.equal(changed[0], first);
+  assert.equal(new URL(changed[1]).searchParams.get("quantity"), "2");
+  assert.deepEqual(quote.removeQuotedProduct([first, second], product), [first]);
+  const basket = { products: [product], cartItems: [{}], pricing: { totalFinal: 125, checkoutEnabled: true }, expiresAt: "2030-01-01T00:00:00Z" };
+  const now = Date.parse("2026-10-08T23:00:00Z");
+  assert.equal(quote.canCheckoutBasket(basket, now), true);
+  assert.equal(quote.canCheckoutBasket({ ...basket, errors: [{ url: first, error: "Sin stock" }] }, now), false);
+  assert.equal(quote.canCheckoutBasket({ ...basket, pricing: { ...basket.pricing, checkoutEnabled: false } }, now), false);
+  assert.equal(quote.canCheckoutBasket({ ...basket, expiresAt: "2026-10-08T22:00:00Z" }, now), false);
+  assert.equal(quote.canCheckoutBasket({ ...basket, pricing: { totalFinal: NaN } }, now), false);
+  assert.deepEqual(quote.quotedProductUrls(basket), [second + "?quantity=1"]);
+});
+
+test("Manual quotes require Argentina postal code and send each product's details exactly", async () => {
+  let calls = 0;
+  let payload;
+  const manual = load("lib/quote-manual.ts", {
+    "@react-native-async-storage/async-storage": {},
+    "./request": { request: async (path, options) => { calls++; assert.equal(path, "/api/quotes"); assert.equal(options.authenticated, true); payload = options.body; return { ok: true, quotes: [{ id: "q", quoteNumber: "Q123" }] }; } },
+  });
+  const products = [{ ...manual.createManualProduct("www.nike.com/product"), productName: " Zapatillas ", size: " 42 ", color: " Azul ", specs: " Modelo exacto ", quantity: "2" }, manual.createManualProduct("https://www.gap.com/product")];
+  await assert.rejects(manual.sendManualQuote(products, "", "explicit_submit"), /código postal/);
+  await assert.rejects(manual.sendManualQuote(products, "123", "explicit_submit"), /código postal/);
+  await assert.rejects(manual.sendManualQuote(products, "1425", "login"), /Confirmá/);
+  await assert.rejects(manual.sendManualQuote([{ ...products[0], quantity: "4" }], "1425", "explicit_submit"), /1 a 3/);
+  await assert.rejects(manual.sendManualQuote([{ ...products[0], quantity: "1.5" }], "1425", "explicit_submit"), /1 a 3/);
+  assert.equal(calls, 0);
+  const quotes = await manual.sendManualQuote(products, "c1425 abc", "explicit_submit");
+  assert.equal(calls, 1);
+  assert.equal(quotes[0].quoteNumber, "Q123");
+  assert.equal(payload.postalCode, "C1425ABC");
+  assert.equal(payload.source, "app_quotes");
+  assert.deepEqual(payload.products[0], { sourceUrl: "https://www.nike.com/product", productName: "Zapatillas", quantity: 2, requestedSize: "42", requestedColor: "Azul", customerNotes: "Modelo exacto" });
+  assert.equal(payload.products[1].quantity, 1);
+});
+
+test("Restoring a quote draft preserves postal code and selections without submitting", async () => {
+  const data = new Map();
+  let calls = 0;
+  const manual = load("lib/quote-manual.ts", {
+    "@react-native-async-storage/async-storage": { getItem: async key => data.get(key), setItem: async (key, value) => data.set(key, value), removeItem: async key => data.delete(key) },
+    "./request": { request: async () => { calls++; } },
+  });
+  const products = [{ ...manual.createManualProduct("https://gap.com/item?quantity=2"), size: "M", color: "Blue" }];
+  await manual.saveManualQuoteDraft({ products, postalCode: "c1425abc" });
+  const restored = await manual.readManualQuoteDraft();
+  assert.deepEqual(restored, { products, postalCode: "C1425ABC" });
+  assert.equal(restored.products[0].quantity, "2");
+  assert.equal(calls, 0);
+  await manual.clearManualQuoteDraft();
+  assert.equal(await manual.readManualQuoteDraft(), null);
+});
+
+test("Public ShopX requests support cancellation without sending auth to retailers", async () => {
+  const originalFetch = global.fetch;
+  const network = load("lib/request.ts", { "./auth": { getAuthToken: async () => { throw new Error("Public quote must not request a token"); } }, "./config": { buildApiUrl: path => `https://www.shopx-ar.com${path}` } });
+  const controller = new AbortController();
+  let fetchStarted;
+  const started = new Promise(resolve => { fetchStarted = resolve; });
+  global.fetch = (url, options) => {
+    assert.equal(url, "https://www.shopx-ar.com/api/amazon-quote-batch");
+    assert.equal(options.headers.Authorization, undefined);
+    fetchStarted();
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(Object.assign(new Error("cancelled"), { name: "AbortError" }));
+      if (options.signal.aborted) abort(); else options.signal.addEventListener("abort", abort, { once: true });
+    });
+  };
+  try {
+    const pending = network.request("/api/amazon-quote-batch", { method: "POST", body: { urls: [] }, signal: controller.signal });
+    await started;
+    controller.abort();
+    await assert.rejects(pending, error => error.status === 408);
+  } finally { global.fetch = originalFetch; }
+});
+
 
 test("Store catalog encodes filters and can request pages after the old 36-product limit", async () => {
   let called;
@@ -259,4 +394,145 @@ test("The want-it collection retries failures, preserves editorial order and ded
   assert.equal(calls, 2);
   await store.getWantItProducts(true);
   assert.equal(calls, 3);
+});
+
+function trackingOrder(overrides = {}) {
+  return {
+    _id: "synthetic-tracking-order", orderNumber: "TEST-TRACKING", status: "paid",
+    paymentStatus: "approved", totalUSD: 125, itemsCount: 1,
+    items: [{ title: "Producto de prueba", qty: 1, priceUSD: 100 }],
+    delivery: { rows: [], purchases: [{ purchased: false, at: null }], paidARS: null, estimatedMiamiAt: null },
+    ...overrides,
+  };
+}
+function inboundRow(overrides = {}) {
+  return { key: "package-1", itemIndex: 0, title: "Producto de prueba", store: "Amazon",
+    carrier: "UPS", number: "1Z1234567890", url: "", status: "ordered",
+    eta: null, etaEnd: null, deliveredAt: null, eventAt: null, checkedAt: null,
+    confirmedMiami: false, review: false, refunded: false, direct: false, ...overrides };
+}
+
+test("Tracking separates payment, purchase, USA transit and warehouse reception", () => {
+  const { stageOf, purchaseComplete, shipmentLabel } = load("lib/order-tracking/view-model.ts");
+  const order = trackingOrder();
+  assert.equal(stageOf(order), 0);
+  assert.equal(purchaseComplete(order), false);
+  order.delivery.purchases[0] = { purchased: true, at: "2026-10-01T15:00:00Z" };
+  assert.equal(stageOf(order), 1);
+  const row = inboundRow({ status: "delivered" });
+  order.delivery.rows = [row];
+  assert.equal(stageOf(order), 2, "A USA delivered scan is not warehouse or customer delivery");
+  assert.equal(shipmentLabel(row), "Entrega informada por transportista");
+  row.confirmedMiami = true;
+  assert.equal(shipmentLabel(row), "Entregado a Fast Track");
+  assert.equal(stageOf(order), 2, "A per-package receipt must not advance the entire order");
+  order.status = "in_miami_warehouse";
+  assert.equal(stageOf(order), 3);
+});
+
+test("Current order status wins over stale labels, payments and old tracking milestones", () => {
+  const { stageOf } = load("lib/order-tracking/view-model.ts");
+  const { listStatus, orderGroup } = load("lib/order-tracking/list-model.ts");
+  for (const [status, stage, label] of [
+    ["in_miami_warehouse", 3, "En depósito Miami"], ["in_transit", 4, "En tránsito a Argentina"],
+    ["arrived_argentina", 5, "Arribado a Argentina"], ["arrived_in_argentina", 5, "Arribado a Argentina"],
+    ["shipped", 6, "En entrega local"], ["delivered", 7, "Entregado"], ["cancelled", -1, "Cancelado"],
+  ]) {
+    const order = trackingOrder({ status, paymentStatus: "pending", tracking: { currentStep: "purchased", currentLabel: "Pago pendiente" } });
+    assert.equal(stageOf(order), stage);
+    assert.equal(listStatus(order).label, label);
+  }
+  const delivered = trackingOrder({ status: "delivered", paymentStatus: "refunded" });
+  assert.equal(orderGroup(delivered), "cancelled");
+  assert.equal(listStatus(delivered).label, "Reembolsado");
+  assert.equal(listStatus(trackingOrder({ status: "incident" })).label, "En revisión");
+});
+
+test("Payment regression recovery respects corrections and complete partial coverage", () => {
+  const { resolveOrderStatus } = load("lib/order-tracking/order-status.ts");
+  const order = trackingOrder({ tracking: { currentStep: "argentina", history: [{ status: "arrived_argentina" }] } });
+  assert.equal(resolveOrderStatus(order), "arrived_argentina");
+  order.tracking.history.push({ status: "processing" });
+  assert.equal(resolveOrderStatus(order), "paid", "An explicit backwards correction is preserved");
+  order.tracking.history = [{ status: "arrived_argentina" }];
+  order.items.push({ title: "Segundo producto", qty: 1, priceUSD: 10 });
+  order.partialShipments = [{ id: "a", itemIndexes: [0], status: "arrived_argentina" }];
+  assert.equal(resolveOrderStatus(order), "paid", "An uncovered item cannot be considered delivered");
+  order.partialShipments.push({ id: "b", itemIndexes: [1], status: "in_transit" });
+  assert.equal(resolveOrderStatus(order), "paid");
+  order.partialShipments[1].status = "arrived_argentina";
+  assert.equal(resolveOrderStatus(order), "arrived_argentina");
+  order.paymentStatus = "refunded";
+  assert.equal(resolveOrderStatus(order), "paid", "A refund cannot revive shipment progress");
+});
+
+test("Partial shipments, direct routes and review flags do not invent a Miami arrival", () => {
+  const { stageOf, isDirectOrder, validInbound } = load("lib/order-tracking/view-model.ts");
+  const { listStatus, miniProgress } = load("lib/order-tracking/list-model.ts");
+  const order = trackingOrder();
+  order.delivery.rows = [inboundRow({ status: "in_transit" })];
+  order.partialShipments = [{ id: "a", sequence: 1, status: "in_transit", itemIndexes: [0] }];
+  assert.equal(stageOf(order), 1, "Product bought, without promoting the whole partial order to transit");
+  order.partialShipments = [];
+  order.delivery.rows[0].direct = true;
+  assert.equal(isDirectOrder(order), true);
+  assert.equal(stageOf(order), 0);
+  assert.equal(miniProgress(order).some(step => /Miami/.test(step.label)), false);
+  assert.equal(listStatus(order).label, "Envío directo a Argentina");
+  order.delivery.rows[0].review = true;
+  assert.equal(isDirectOrder(order), false);
+  assert.equal(validInbound(order.delivery.rows[0]), false);
+  assert.equal(listStatus(order).label, "Seguimiento en revisión");
+});
+
+test("Local tracking retains package scopes, removes duplicate general references and never infers dispatch from a number", () => {
+  const { localDeliveryRows } = load("lib/order-tracking/detail-shipping.ts");
+  const order = trackingOrder({ status: "arrived_argentina", localTrackingNumber: "PA123456789AR", localCourierName: "Correo Argentino" });
+  let [row] = localDeliveryRows(order);
+  assert.equal(row.dispatchedAt, null);
+  assert.equal(row.deliveredAt, null);
+  order.partialShipments = [{ id: "lot-a", sequence: 1, code: "A", itemIndexes: [0], status: "shipped", localTrackingNumber: "PA123456789AR", localCourierName: "Correo Argentino", history: [{ status: "shipped", date: "2026-10-08T18:12:00Z" }] }];
+  const rows = localDeliveryRows(order);
+  assert.equal(rows.length, 1);
+  [row] = rows;
+  assert.equal(row.key, "partial:lot-a");
+  assert.equal(row.dispatchedAt, "2026-10-08T18:12:00.000Z");
+  assert.equal(row.deliveredAt, null);
+  assert.deepEqual(row.products, ["1 × Producto de prueba"]);
+  order.partialShipments[0].localTrackingNumber = "PA987654321AR";
+  assert.equal(localDeliveryRows(order).length, 2, "Distinct order and lot references stay separate");
+});
+
+test("Correo Argentino tracking hides replaced identities and keeps valid history after sync errors", () => {
+  const { customerLocalTracking, correoTrackingNumber } = load("lib/order-tracking/local-tracking.ts");
+  const tracking = { provider: "correo_argentino", trackingNumber: "PA123456789AR", lastError: "timeout",
+    events: [{ date: "2026-10-09T12:00:00Z", branch: "Buenos Aires", event: "En distribución", status: "En camino" }, { date: "invalid", event: "Bad date" }] };
+  assert.equal(customerLocalTracking(tracking, "PA987654321AR", "Correo Argentino"), null);
+  assert.equal(customerLocalTracking(tracking, "PA123456789AR", "Otro correo"), null);
+  const result = customerLocalTracking(tracking, "PA123456789AR", "Correo Argentino");
+  assert.equal(result.events.length, 1);
+  assert.equal(result.lastError, "timeout");
+  assert.equal(correoTrackingNumber("123456789"), null, "Never invent a product prefix");
+});
+
+test("Local dates are registered Argentina times, not order edits or USA scans", () => {
+  const { localRegistrationDate } = load("lib/order-tracking/local-registration.ts");
+  const { currentShipmentState, localDeliveryRows } = load("lib/order-tracking/detail-shipping.ts");
+  assert.equal(localRegistrationDate("2026-10-08T18:12:00Z"), "08/10/2026 · 15:12 hs (Argentina)");
+  assert.equal(localRegistrationDate("invalid"), "");
+  const order = trackingOrder({ status: "shipped", updatedAt: "2026-10-09T12:00:00Z", localTrackingNumber: "ABC123", tracking: { miamiAt: "2026-10-01T12:00:00Z" } });
+  assert.equal(currentShipmentState(order).label, "En entrega local");
+  assert.equal(currentShipmentState(order).at, null);
+  assert.equal(localDeliveryRows(order)[0].dispatchedAt, null);
+});
+
+test("Only public carrier links are built and unknown prices or arrival dates stay unknown", () => {
+  const { publicTrackingUrl, etaHint } = load("lib/order-tracking/view-model.ts");
+  const { storedARS, orderMilestone } = load("lib/order-tracking/list-model.ts");
+  assert.equal(publicTrackingUrl("Amazon", "123456789"), "");
+  assert.equal(publicTrackingUrl("UPS", "javascript:alert(1)"), "");
+  assert.match(publicTrackingUrl("FedEx", "123456789"), /^https:\/\/www\.fedex\.com\//);
+  assert.equal(storedARS(trackingOrder({ totalARS: 0, exchangeRateUsed: 1500 })), null);
+  assert.equal(orderMilestone(trackingOrder()).value, "Por confirmar");
+  assert.match(etaHint("2026-10-01T12:00:00Z", null, new Date("2026-10-09T12:00:00Z")), /vencida/);
 });

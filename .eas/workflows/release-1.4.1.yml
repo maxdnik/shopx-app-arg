@@ -1,0 +1,33 @@
+name: ShopX 1.4.1 WhatsApp support fix
+on:
+  push:
+    branches: ['release/shopx-1.4.1']
+jobs:
+  verify:
+    name: Verify ShopX 1.4.1
+    environment: production
+    steps:
+      - uses: eas/checkout
+      - uses: eas/install_node_modules
+      - run: npm run verify:release
+  ios:
+    name: Build ShopX 1.4.1 iOS
+    needs: [verify]
+    type: build
+    params:
+      platform: ios
+      profile: production
+  android:
+    name: Build ShopX 1.4.1 Android
+    needs: [verify]
+    type: build
+    params:
+      platform: android
+      profile: production
+  submit_ios:
+    name: Upload ShopX 1.4.1 to App Store Connect
+    needs: [ios]
+    type: submit
+    params:
+      build_id: ${{ needs.ios.outputs.build_id }}
+      profile: production
