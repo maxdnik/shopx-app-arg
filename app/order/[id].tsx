@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { formatUSD } from "../../lib/api";
-import { buildApiUrl } from "../../lib/config";
+import { buildApiUrl, SHOPX_WHATSAPP_URL } from "../../lib/config";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { fetchCurrentUser, getStoredUser, ShopXUser } from "../../lib/auth";
 import {
@@ -820,7 +820,7 @@ export default function OrderDetailScreen() {
           <TouchableOpacity
             style={styles.topIconButton}
             activeOpacity={0.85}
-            onPress={() => Linking.openURL("https://wa.me/5491150000000")}
+            onPress={() => Linking.openURL(SHOPX_WHATSAPP_URL)}
           >
             <MaterialCommunityIcons name="whatsapp" size={21} color={navy} />
           </TouchableOpacity>
@@ -1189,7 +1189,7 @@ export default function OrderDetailScreen() {
 
           <TouchableOpacity
             style={styles.helpButton}
-            onPress={() => Linking.openURL("https://wa.me/5491150000000")}
+            onPress={() => Linking.openURL(SHOPX_WHATSAPP_URL)}
           >
             <Text style={styles.helpButtonText}>Abrir</Text>
           </TouchableOpacity>

@@ -27,6 +27,7 @@ import { ScreenHeader } from "../../components/ScreenHeader";
 import { useFavorites } from "../../hooks/useFavorites";
 import { AppOrder, getAppOrders } from "../../lib/orders";
 import { GOOGLE_AUTH_CONFIG } from "../../lib/google-auth-config";
+import { SHOPX_WHATSAPP_URL } from "../../lib/config";
 import {
   CheckoutProfile,
   fetchCurrentUser,
@@ -439,7 +440,7 @@ export default function ProfileScreen() {
   }
 
   function handleOpenWhatsapp() {
-    Linking.openURL("https://wa.me/5491150000000");
+    Linking.openURL(SHOPX_WHATSAPP_URL);
   }
 
   async function handleAppleLogin() {
