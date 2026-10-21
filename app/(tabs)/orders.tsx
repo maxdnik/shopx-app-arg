@@ -1,7 +1,8 @@
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useRef } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Image,
   Linking,
   RefreshControl,
@@ -16,6 +17,8 @@ import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { formatUSD } from "../../lib/api";
 import { fetchCurrentUser, getStoredUser, ShopXUser } from "../../lib/auth";
+import { listStatus, miniProgress, orderGroup, orderMilestone, storedARS } from "../../lib/order-tracking/list-model";
+import { dateLabel } from "../../lib/order-tracking/view-model";
 import { AppOrder, createMercadoPagoCheckout, getAppOrders } from "../../lib/orders";
 
 const navy = "#062B4F";
@@ -35,32 +38,8 @@ const red = "#DC2626";
 const redSoft = "#FEF2F2";
 
 type FilterKey = "active" | "delivered" | "all";
-type VisualStep = "pending_payment" | "paid" | "processing" | "miami" | "traveling" | "argentina" | "delivered" | "cancelled";
-
-const timelineSteps: { key: VisualStep; label: string; icon: string }[] = [
-  { key: "paid", label: "Pago", icon: "check-circle" },
-  { key: "processing", label: "Compra", icon: "shopping-bag" },
-  { key: "miami", label: "Miami", icon: "home" },
-  { key: "traveling", label: "Viaje", icon: "navigation" },
-  { key: "argentina", label: "Argentina", icon: "map-pin" },
-  { key: "delivered", label: "Entrega", icon: "package" },
-];
-
-function clean(value: any) {
-  return String(value || "").trim();
-}
-
 function formatDate(value?: string) {
-  if (!value) return "Sin fecha";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
-
-  return new Intl.DateTimeFormat("es-AR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
+  return dateLabel(value) || "Sin fecha";
 }
 
 function getOrderId(order: AppOrder) {
@@ -83,182 +62,20 @@ function getItemsCount(order: AppOrder) {
   }, 0);
 }
 
-function normalizeStep(value?: string): VisualStep | null {
-  const status = clean(value)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  if (!status) return null;
-  if (["pending_payment", "payment_pending"].includes(status)) return "pending_payment";
-  if (["paid", "payment_approved", "approved"].includes(status)) return "paid";
-  if (["processing", "purchased", "purchase_in_progress"].includes(status)) return "processing";
-  if (["miami", "warehouse", "in_miami_warehouse", "received_miami"].includes(status)) return "miami";
-  if (["traveling", "in_transit", "transit", "viaje", "en viaje a argentina"].includes(status)) return "traveling";
-  if (
-    [
-      "argentina",
-      "customs",
-      "local_delivery",
-      "shipped",
-      "despachado",
-      "enviado",
-      "enviado correo local",
-      "en argentina",
-      "llego a argentina",
-    ].includes(status)
-  ) {
-    return "argentina";
-  }
-  if (status === "delivered") return "delivered";
-  if (["cancelled", "canceled", "rejected", "refunded"].includes(status)) return "cancelled";
-
-  return null;
-}
-
-function getVisualStep(order: AppOrder): VisualStep {
-  const status = clean(order.status).toLowerCase();
-  const paymentStatus = clean(order.paymentStatus).toLowerCase();
-  const trackingStep = normalizeStep(order.tracking?.currentStep);
-  const trackingLabel = normalizeStep(order.tracking?.currentLabel);
-  const normalizedStatus = normalizeStep(status);
-
-  // IMPORTANTE:
-  // En el admin, el estado "shipped" significa "Enviado (Correo Local)".
-  // Eso ya corresponde al tramo Argentina, no al tramo Viaje.
-  // Además, puede haber órdenes viejas con tracking.currentStep="traveling"
-  // y status="shipped". Por eso el status real debe ganar en este caso.
-  if (["shipped", "local_delivery", "argentina", "customs"].includes(status)) {
-    return "argentina";
-  }
-
-  if (normalizedStatus === "delivered" || trackingStep === "delivered") return "delivered";
-  if (normalizedStatus === "cancelled" || trackingStep === "cancelled") return "cancelled";
-
-  if (trackingStep) return trackingStep;
-  if (trackingLabel) return trackingLabel;
-  if (normalizedStatus) return normalizedStatus;
-
-  if (["approved", "paid"].includes(paymentStatus)) return "paid";
-  if (["pending", "in_process"].includes(paymentStatus)) return "pending_payment";
-  if (["rejected", "cancelled", "canceled"].includes(paymentStatus)) return "cancelled";
-
-  return "processing";
-}
-
-function isDelivered(order: AppOrder) {
-  return getVisualStep(order) === "delivered";
-}
-
-function isCancelled(order: AppOrder) {
-  return getVisualStep(order) === "cancelled";
-}
-
-function isPendingPayment(order: AppOrder) {
-  return getVisualStep(order) === "pending_payment";
-}
-
-function isActive(order: AppOrder) {
-  return !isDelivered(order) && !isCancelled(order);
-}
-
-function getStepIndex(step: VisualStep) {
-  if (step === "pending_payment" || step === "cancelled") return -1;
-  return Math.max(0, timelineSteps.findIndex((item) => item.key === step));
-}
+function isDelivered(order: AppOrder) { return orderGroup(order) === "delivered"; }
+function isCancelled(order: AppOrder) { return orderGroup(order) === "cancelled"; }
+function isPendingPayment(order: AppOrder) { return order.status === "pending_payment" && !isCancelled(order); }
+function isActive(order: AppOrder) { return orderGroup(order) === "active"; }
 
 function getStatusMeta(order: AppOrder) {
-  const step = getVisualStep(order);
-
-  if (order.tracking?.currentLabel && !isCancelled(order)) {
-    return {
-      label: order.tracking.currentLabel,
-      description:
-        order.tracking.currentDescription ||
-        "Tu pedido está avanzando dentro del circuito ShopX.",
-      color: navy,
-      bg: softCard,
-      icon: "map-pin",
-    };
-  }
-
-  const map: Record<VisualStep, any> = {
-    pending_payment: {
-      label: "Pago pendiente",
-      description: "Completá el pago para que iniciemos la compra en USA.",
-      color: orange,
-      bg: orangeSoft,
-      icon: "credit-card",
-    },
-    paid: {
-      label: "Pago confirmado",
-      description: "Recibimos tu pago y estamos preparando la compra.",
-      color: green,
-      bg: greenSoft,
-      icon: "check-circle",
-    },
-    processing: {
-      label: "Compra en proceso",
-      description: "Estamos gestionando tu producto con origen USA.",
-      color: navy,
-      bg: softCard,
-      icon: "shopping-bag",
-    },
-    miami: {
-      label: "Recibido en Miami",
-      description: "Tu compra llegó al depósito y será preparada para viajar.",
-      color: navy,
-      bg: softCard,
-      icon: "home",
-    },
-    traveling: {
-      label: "En viaje a Argentina",
-      description: "Tu pedido está viajando hacia Argentina.",
-      color: navy,
-      bg: softCard,
-      icon: "navigation",
-    },
-    argentina: {
-      label: "En Argentina",
-      description: "Tu pedido ya está en Argentina y avanza con la entrega local.",
-      color: navy,
-      bg: softCard,
-      icon: "map-pin",
-    },
-    delivered: {
-      label: "Entregado",
-      description: "Tu pedido fue entregado. Gracias por comprar con ShopX.",
-      color: green,
-      bg: greenSoft,
-      icon: "package",
-    },
-    cancelled: {
-      label: "Cancelado",
-      description: "Este pedido fue cancelado o rechazado.",
-      color: red,
-      bg: redSoft,
-      icon: "x-circle",
-    },
+  const status = listStatus(order);
+  const colors = {
+    blue: { color: navy, bg: softCard, icon: "package" },
+    green: { color: green, bg: greenSoft, icon: "check-circle" },
+    amber: { color: "#92400E", bg: orangeSoft, icon: "alert-circle" },
+    muted: { color: muted, bg: softCard, icon: "info" },
   };
-
-  return map[step];
-}
-
-function getNextStepText(order: AppOrder) {
-  const step = getVisualStep(order);
-
-  const map: Record<VisualStep, string> = {
-    pending_payment: "Pagá el pedido para que ShopX pueda iniciar la compra.",
-    paid: "Nuestro equipo validará la orden y realizará la compra en USA.",
-    processing: "Te avisaremos cuando el producto llegue al depósito de Miami.",
-    miami: "El próximo paso es preparar el envío internacional a Argentina.",
-    traveling: "Te notificaremos cuando el pedido ingrese al circuito local.",
-    argentina: "Tu pedido ya está en Argentina. Estamos coordinando la entrega local.",
-    delivered: "Pedido finalizado. Podés volver a comprar o guardar favoritos.",
-    cancelled: "Si necesitás ayuda, contactá a soporte ShopX.",
-  };
-
-  return map[step];
+  return { ...status, ...colors[status.tone] };
 }
 
 function formatARS(value?: number) {
@@ -280,6 +97,7 @@ export default function OrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const requestVersion = useRef(0);
 
   const activeCount = useMemo(() => orders.filter(isActive).length, [orders]);
   const deliveredCount = useMemo(() => orders.filter(isDelivered).length, [orders]);
@@ -296,43 +114,35 @@ export default function OrdersScreen() {
     return source;
   }, [orders, filter]);
 
-  async function loadOrders(options?: { silent?: boolean }) {
-    if (!options?.silent) setLoading(true);
+  const loadOrders = useCallback(async (options?: { silent?: boolean }) => {
+    const version = ++requestVersion.current;
+    if (!options?.silent) { setLoading(true); setOrders([]); }
     setError("");
-
     try {
-      let nextUser = await getStoredUser();
-
-      if (!nextUser) {
-        nextUser = await fetchCurrentUser();
-      }
-
+      const storedUser = await getStoredUser();
+      const nextUser = storedUser || (await fetchCurrentUser());
+      if (version !== requestVersion.current) return;
       setUser(nextUser);
-
-      if (!nextUser?.email) {
-        setOrders([]);
-        return;
-      }
-
-      const data = await getAppOrders({
-        email: nextUser.email,
-        phone: nextUser.phone,
-        limit: 80,
-      });
-
-      setOrders(data || []);
+      if (!nextUser?.email) { setOrders([]); return; }
+      const data = await getAppOrders({ email: nextUser.email, phone: nextUser.phone, limit: 80 });
+      if (version === requestVersion.current) setOrders(data || []);
     } catch (err: any) {
-      setError(err?.message || "No pudimos cargar tus pedidos.");
+      if (version === requestVersion.current) setError(err?.message || "No pudimos cargar tus pedidos.");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (version === requestVersion.current) { setLoading(false); setRefreshing(false); }
     }
-  }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadOrders();
-    }, [])
+      void loadOrders();
+      const refresh = () => {
+        if (AppState.currentState === "active") void loadOrders({ silent: true });
+      };
+      const interval = setInterval(refresh, 60000);
+      const subscription = AppState.addEventListener("change", state => { if (state === "active") refresh(); });
+      return () => { clearInterval(interval); subscription.remove(); requestVersion.current += 1; };
+    }, [loadOrders]),
   );
 
   async function handleRefresh() {
@@ -364,39 +174,26 @@ export default function OrdersScreen() {
   }
 
   function renderTimeline(order: AppOrder) {
-    const current = getVisualStep(order);
-    const currentIndex = getStepIndex(current);
-
-    if (current === "pending_payment") {
+    if (isPendingPayment(order) || isCancelled(order)) {
       return (
         <View style={styles.pendingTimeline}>
-          <Feather name="credit-card" size={17} color={orange} />
-          <Text style={styles.pendingTimelineText}>Pendiente de pago para iniciar la compra</Text>
-        </View>
-      );
-    }
-
-    if (current === "cancelled") {
-      return (
-        <View style={styles.cancelledTimeline}>
-          <Feather name="x-circle" size={17} color={red} />
-          <Text style={styles.cancelledTimelineText}>Pedido cancelado</Text>
+          <Feather name="info" size={17} color={navy} />
+          <Text style={styles.pendingTimelineText}>{listStatus(order).description}</Text>
         </View>
       );
     }
 
     return (
       <View style={styles.timelineRow}>
-        {timelineSteps.map((step, index) => {
-          const done = index <= currentIndex;
-          const active = step.key === current;
+        {miniProgress(order).map((step) => {
+          const { done, current: active } = step;
 
           return (
-            <View key={step.key} style={styles.timelineStep}>
+            <View key={step.label} style={styles.timelineStep}>
               <View style={[styles.timelineDot, done && styles.timelineDotDone, active && styles.timelineDotActive]}>
                 {done ? <Feather name="check" size={10} color={white} /> : null}
               </View>
-              <Text style={[styles.timelineLabel, done && styles.timelineLabelDone]} numberOfLines={1}>
+              <Text style={[styles.timelineLabel, done && styles.timelineLabelDone]} >
                 {step.label}
               </Text>
             </View>
@@ -412,7 +209,8 @@ export default function OrdersScreen() {
     const items = Array.isArray(order.items) ? order.items : [];
     const firstItem = items[0];
     const image = getItemImage(firstItem);
-    const totalARS = formatARS(order.totalARS);
+    const totalARS = formatARS(storedARS(order) ?? undefined);
+    const milestone = orderMilestone(order);
     const totalUSD = Number(order.totalUSD || 0);
     const count = getItemsCount(order);
 
@@ -450,7 +248,7 @@ export default function OrdersScreen() {
               {firstItem?.title || `${count} producto${count === 1 ? "" : "s"}`}
             </Text>
             <Text style={styles.productSubtitle} numberOfLines={1}>
-              {count} producto{count === 1 ? "" : "s"} · {getNextStepText(order)}
+              {count} producto{count === 1 ? "" : "s"}
             </Text>
 
             <View style={styles.amountRow}>
@@ -482,12 +280,12 @@ export default function OrdersScreen() {
           ) : (
             <View style={styles.nextStepBox}>
               <Feather name="info" size={15} color={navy} />
-              <Text style={styles.nextStepText} numberOfLines={2}>{getNextStepText(order)}</Text>
+              <Text style={styles.nextStepText} >{milestone.label}: {milestone.value}{"\n"}{milestone.hint}</Text>
             </View>
           )}
 
           <View style={styles.openButton}>
-            <Text style={styles.openButtonText}>Ver detalle</Text>
+            <Text style={styles.openButtonText}>{isActive(order) ? "Ver seguimiento" : "Ver detalles"}</Text>
             <Feather name="arrow-right" size={16} color={accent} />
           </View>
         </View>
@@ -515,7 +313,7 @@ export default function OrdersScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={navy} />}
       >
-        <ScreenHeader title="Mis pedidos" subtitle="Seguimiento real de tus compras ShopX." />
+        <ScreenHeader title="Mis pedidos" subtitle="De Estados Unidos hasta tu domicilio." />
 
         <View style={styles.heroCard}>
           <View style={styles.heroIcon}>
@@ -660,24 +458,22 @@ const styles = StyleSheet.create({
   amountRow: { flexDirection: "row", alignItems: "baseline", gap: 9, marginTop: 9, flexWrap: "wrap" },
   totalUSD: { color: navy, fontSize: 19, fontWeight: "900" },
   totalARS: { color: muted, fontSize: 12, fontWeight: "800" },
-  timelineRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: border },
+  timelineRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: border },
   timelineStep: { alignItems: "center", flex: 1, gap: 5 },
   timelineDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#E6EDF5", alignItems: "center", justifyContent: "center" },
   timelineDotDone: { backgroundColor: navy },
   timelineDotActive: { borderWidth: 3, borderColor: "#BDEFF5" },
-  timelineLabel: { color: "#A0AEC0", fontSize: 9, fontWeight: "800" },
+  timelineLabel: { color: muted, fontSize: 11, lineHeight: 15, textAlign: "center", fontWeight: "700" },
   timelineLabelDone: { color: navy },
   pendingTimeline: { marginTop: 16, borderTopWidth: 1, borderTopColor: border, paddingTop: 14, flexDirection: "row", alignItems: "center", gap: 8 },
   pendingTimelineText: { color: orange, fontSize: 13, fontWeight: "800" },
-  cancelledTimeline: { marginTop: 16, borderTopWidth: 1, borderTopColor: border, paddingTop: 14, flexDirection: "row", alignItems: "center", gap: 8 },
-  cancelledTimelineText: { color: red, fontSize: 13, fontWeight: "800" },
-  cardActionsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 17 },
+  cardActionsRow: { gap: 10, marginTop: 17 },
   payButton: { minHeight: 48, borderRadius: 17, backgroundColor: navy, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   payButtonText: { color: white, fontSize: 14, fontWeight: "900" },
-  nextStepBox: { flex: 1, minHeight: 48, borderRadius: 17, backgroundColor: softCard, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
+  nextStepBox: { paddingVertical: 12, minHeight: 48, borderRadius: 17, backgroundColor: softCard, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
   nextStepText: { flex: 1, color: muted, fontSize: 12, lineHeight: 16, fontWeight: "800" },
   openButton: { minHeight: 48, borderRadius: 17, backgroundColor: "#EAFBFD", paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
-  openButtonText: { color: accent, fontSize: 13, fontWeight: "900" },
+  openButtonText: { color: "#087F91", fontSize: 13, fontWeight: "900" },
   emptyCard: { backgroundColor: white, borderRadius: 30, padding: 26, alignItems: "center", borderWidth: 1, borderColor: border, marginTop: 8 },
   emptyTitle: { color: text, fontSize: 22, fontWeight: "900", marginTop: 14, textAlign: "center" },
   emptyText: { color: muted, fontSize: 14, lineHeight: 21, fontWeight: "700", textAlign: "center", marginTop: 8 },

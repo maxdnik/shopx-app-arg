@@ -20,12 +20,16 @@ export async function request<T>(
     body?: unknown;
     authenticated?: boolean;
     timeoutMs?: number;
+    signal?: AbortSignal;
   } = {},
 ): Promise<T> {
   const token = options.authenticated ? await getAuthToken() : null;
   if (options.authenticated && !token)
     throw new ApiError("Iniciá sesión para continuar.", 401);
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) abort();
+  else options.signal?.addEventListener("abort", abort);
   const timeout = setTimeout(
     () => controller.abort(),
     options.timeoutMs ?? 30000,
@@ -68,5 +72,6 @@ export async function request<T>(
     throw error;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abort);
   }
 }

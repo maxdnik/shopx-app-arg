@@ -1,6 +1,8 @@
 // lib/orders.ts
 import { getAuthToken } from "./auth";
 import { buildApiUrl } from "./config";
+import type { CustomerDelivery, CustomerOrderView } from "./order-tracking/view-model";
+import type { LocalTracking } from "./order-tracking/local-tracking";
 
 export type AppOrderBuyer = {
   fullName?: string;
@@ -46,6 +48,7 @@ export type AppOrderItem = {
 };
 
 export type PricingBreakdownRow = {
+  key?: string;
   label: string;
   amount: number;
 };
@@ -70,6 +73,8 @@ export type AppOrderTracking = {
   history?: TrackingHistoryItem[];
   miamiAt?: string;
   transitAt?: string;
+  arrivedArgentinaAt?: string;
+  localDeliveryAt?: string;
   deliveredAt?: string;
 };
 
@@ -113,16 +118,10 @@ export type CreateMercadoPagoCheckoutPayload = {
 };
 
 export type AppOrder = {
-  partialShipments?: {
-    id: string;
-    code: string;
-    sequence: number;
-    status: string;
-    itemIndexes: number[];
-    localTrackingNumber?: string;
-    localCourierName?: string;
-    history?: { label?: string; status?: string; date?: string }[];
-  }[];
+  partialShipments?: CustomerOrderView["partialShipments"];
+  delivery?: CustomerDelivery;
+  localTracking?: LocalTracking | null;
+  paidAt?: string | null;
   _id: string;
   orderNumber: string;
   userId?: string;
