@@ -1,7 +1,7 @@
 {
   "name": "shopx-app",
   "main": "expo-router/entry",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test:parity": "node --test tests/app-parity.test.cjs",
+    "test:parity": "node --test tests/*.test.cjs",
     "verify:release": "npm run typecheck && npm run test:parity && expo export --platform all"
   },
   "dependencies": {

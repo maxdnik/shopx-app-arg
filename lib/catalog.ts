@@ -12,7 +12,9 @@ export type CatalogPage = {
   products: ShopXProduct[];
   pagination: { page: number; total: number; hasMore: boolean };
 };
+export type HomeCampaign = { slug: string; title: string; image: string };
 export type HomeContent = {
+  campaigns?: HomeCampaign[];
   sections: Record<string, ShopXProduct[]>;
   weeklyProducts?: ShopXProduct[];
 };

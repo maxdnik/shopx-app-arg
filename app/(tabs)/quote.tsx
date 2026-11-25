@@ -10,7 +10,7 @@ import { getStoredUser, type ShopXUser } from "../../lib/auth";
 import { formatUSD } from "../../lib/api";
 import { addProductsToCart } from "../../lib/cart-store";
 import {
-  basketCartProducts, calculateQuoteBasket, canCheckoutBasket, changeQuotedQuantity,
+  assistedRetailerLinks, productDeliveryNotice, SLOW_QUOTE_NOTICE_MS, basketCartProducts, calculateQuoteBasket, canCheckoutBasket, changeQuotedQuantity,
   type QuoteBasket, quoteLinks, quotedProductUrls, removeQuotedProduct,
   shouldRouteToManualQuote, supportsAutomaticQuote, validateBasketLinks,
 } from "../../lib/quote-basket";
@@ -35,6 +35,8 @@ export default function QuoteScreen() {
   const [user, setUser] = useState<ShopXUser | null>(null);
   const postalCode = editedPostalCode ?? normalizeQuotePostalCode(user?.address?.postalCode);
   const [loading, setLoading] = useState(false);
+  const [waitingForStore, setWaitingForStore] = useState(false);
+  const [assistedUrls, setAssistedUrls] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [savedNumbers, setSavedNumbers] = useState<string[]>([]);
@@ -88,6 +90,13 @@ export default function QuoteScreen() {
     setError("");
   }, [params.url]);
 
+  useEffect(() => {
+    setWaitingForStore(false);
+    if (!loading) return;
+    const timer = setTimeout(() => setWaitingForStore(true), SLOW_QUOTE_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
   useEffect(() => () => { activeRequest.current?.abort(); activeRequest.current = null; }, []);
   useEffect(() => {
     if (!basket?.expiresAt) return;
@@ -109,6 +118,7 @@ export default function QuoteScreen() {
   async function calculate(nextUrls: string[]) {
     if (busy.current) return;
     setError("");
+    setAssistedUrls([]);
     if (!nextUrls.length) {
       setBasket(undefined);
       setUrls([]);
@@ -131,6 +141,7 @@ export default function QuoteScreen() {
       const value = await calculateQuoteBasket(nextUrls, destination, controller.signal);
       if (activeRequest.current !== controller) return;
       setBasket(value);
+      setAssistedUrls(assistedRetailerLinks(nextUrls, value.errors || []));
       // Use returned canonical product URLs, including resolved short Amazon links.
       setUrls([...quotedProductUrls(value), ...(value.errors || []).map(item => item.url)]);
       setNow(Date.now());
@@ -138,7 +149,9 @@ export default function QuoteScreen() {
     } catch (e) {
       if (activeRequest.current !== controller) return;
       const message = e instanceof Error ? e.message : "No pudimos calcular el precio. Volvé a intentar.";
-      if (!(e instanceof ApiError && e.status === 408) && shouldRouteToManualQuote(nextUrls, message)) {
+      const assisted = assistedRetailerLinks(nextUrls, e instanceof ApiError && Array.isArray(e.data?.errors) ? e.data.errors : undefined);
+      setAssistedUrls(assisted);
+      if (!assisted.length && !(e instanceof ApiError && e.status === 408) && shouldRouteToManualQuote(nextUrls, message)) {
         openManual(nextUrls);
       } else {
         setError(message);
@@ -208,7 +221,7 @@ export default function QuoteScreen() {
 
   function reset() {
     draftEdited.current = true;
-    setSavedNumbers([]); setManual(false); setManualProducts([]); setBasket(undefined); setInput(""); setUrls([]); setError("");
+    setAssistedUrls([]); setSavedNumbers([]); setManual(false); setManualProducts([]); setBasket(undefined); setInput(""); setUrls([]); setError("");
     void clearManualQuoteDraft().catch(() => undefined);
   }
 
@@ -244,12 +257,13 @@ export default function QuoteScreen() {
         {loading && <View style={s.card}>
           <ActivityIndicator color="#062B4F" />
           <Text style={s.heading}>Estamos calculando tu compra</Text>
-          <Text style={s.text}>Revisamos precio, disponibilidad y envío. Si la tienda no responde en 25 segundos, podés volver a intentar.</Text>
+          <Text style={s.text}>{waitingForStore ? "La tienda está tardando más de lo habitual. Seguimos consultando precio y disponibilidad." : "Revisamos precio, disponibilidad y envío."}</Text>
           <TouchableOpacity accessibilityRole="button" onPress={cancelCalculation} style={{ minHeight: 44, justifyContent: "center" }}><Text style={s.store}>Cancelar cálculo</Text></TouchableOpacity>
         </View>}
         {!!error && <View style={s.card}>
           <Text accessibilityRole="alert" style={s.error}>{error}</Text>
           {urls.length > 0 && !manual && button("Volver a calcular", () => calculate(urls), loading)}
+          {assistedUrls.length > 0 && !manual && button("Pedir cotización a ShopX", () => openManual(assistedUrls), loading)}
         </View>}
         {manual && <>
           <ManualQuoteForm products={manualProducts} onProductsChange={setManualProducts} postalCode={postalCode} onPostalCodeChange={setEditedPostalCode} signedIn={!!user} loading={sending} message={manualMessage} onLogin={loginForManualQuote} onSubmit={submitManual} />
@@ -263,6 +277,7 @@ export default function QuoteScreen() {
                 <Text style={s.store}>{product.store}</Text><Text style={s.heading}>{product.title}</Text>
                 {!!(product.selectedColor || product.selectedSize) && <Text style={s.text}>{[product.selectedColor, product.selectedSize].filter(Boolean).join(" · ")}</Text>}
                 <Text style={s.text}>Precio USA: USD {formatUSD(product.priceUSD)}</Text>
+                {!!productDeliveryNotice(product) && <Text style={s.text}>{productDeliveryNotice(product)}</Text>}
               </View>
             </View>
             <View style={s.row}>
@@ -280,6 +295,7 @@ export default function QuoteScreen() {
             </View>)}
             <Text style={s.text}>El total incluye solo los productos calculados. Revisá o quitá los enlaces pendientes antes de continuar.</Text>
             {button("Reintentar cotización completa", () => calculate(urls), loading)}
+            {assistedUrls.length > 0 && button("Pedir ayuda con los pendientes", () => openManual(assistedUrls), loading)}
           </View>}
           <View style={s.card}>
             <Text style={s.heading}>{basket.errors?.length ? "Resumen de productos calculados" : "Resumen de la compra"}</Text>

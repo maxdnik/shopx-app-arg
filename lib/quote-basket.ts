@@ -13,6 +13,13 @@ export type BasketProduct = {
   store: string;
   sourceUrl: string;
   quantity?: number;
+  retailer?: string;
+  purchaseDestination?: {
+    requestedPostalCode: string;
+    observedPostalCode?: string;
+    status: "shipping_to_warehouse" | "shipping_to_other_zip" | "shipping_without_zip" | "unverified" | "forwarder_restricted";
+  };
+  usOriginShipping?: { status: string; amountUSD?: number };
   selectedColor?: string;
   selectedSize?: string;
 };
@@ -35,7 +42,9 @@ export type QuoteBasket = {
   expiresAt?: string;
   error?: string;
 };
-export const AUTOMATIC_QUOTE_TIMEOUT_MS = 25_000;
+// The shared quote handler can need 180 seconds to confirm a supplier offer.
+export const AUTOMATIC_QUOTE_TIMEOUT_MS = 185_000;
+export const SLOW_QUOTE_NOTICE_MS = 25_000;
 export const supportsAutomaticQuote = isSupportedBrightDataRetailerUrl;
 
 export function canonicalQuoteUrl(value: string) {
@@ -115,6 +124,31 @@ export function shouldRouteToManualQuote(urls: string[], message: string) {
     /no devolvió una ficha válida|no pudimos leer el producto|normalization|ficha válida/i.test(message);
 }
 
+const assistedRetailers = new Set(["abercrombie", "hollister", "newegg", "bestbuy", "target", "walmart"]);
+
+/** Assistance preserves only failed URLs and never submits a manual request by itself. */
+export function assistedRetailerLinks(urls: string[], errors?: readonly { url: string; reason: string }[]) {
+  const failed = errors && new Set(errors
+    .filter(({ reason }) => ["not_found", "invalid_product", "invalid_currency", "manual_review"].includes(reason))
+    .map(({ url }) => retailerProductKey(url)));
+  return urls.filter(url => {
+    const retailer = detectBrightDataRetailer(url);
+    return retailer && assistedRetailers.has(retailer.key) && (!failed || failed.has(retailerProductKey(url)));
+  });
+}
+
+export function productDeliveryNotice(product: BasketProduct): string | undefined {
+  const destination = product.purchaseDestination;
+  if (destination?.status === "shipping_to_other_zip")
+    return `Falta confirmar la entrega al depósito de EE. UU. (ZIP ${destination.requestedPostalCode}).`;
+  if (destination?.status === "forwarder_restricted") return "La tienda no confirmó entrega al depósito de EE. UU.";
+  if (destination && ["unverified", "shipping_without_zip"].includes(destination.status))
+    return `Entrega al depósito de EE. UU. (ZIP ${destination.requestedPostalCode}) pendiente de confirmación.`;
+  if (product.usOriginShipping?.status === "confirmed" && Number.isFinite(product.usOriginShipping.amountUSD))
+    return product.usOriginShipping.amountUSD === 0 ? "Envío al depósito de EE. UU.: gratis" : `Envío al depósito de EE. UU.: USD ${product.usOriginShipping.amountUSD!.toFixed(2)}`;
+  return undefined;
+}
+
 export function quotedProductUrls(basket: QuoteBasket) {
   return basket.products.map(product => withQuantity(product.sourceUrl, product.quantity || 1));
 }
@@ -135,8 +169,10 @@ export function canCheckoutBasket(basket: QuoteBasket, now = Date.now()) {
 export function basketCartProducts(
   basket: QuoteBasket,
 ): { product: ShopXProduct; quantity: number }[] {
-  return basket.cartItems.map((item, index) => {
-    const display = basket.products[index];
+  return basket.cartItems.map((item) => {
+    const display = basket.products.find(product => item.sourceUrl
+      ? retailerProductKey(product.sourceUrl) === retailerProductKey(item.sourceUrl)
+      : [product.id, product.productId].includes(String(item.id || item.productId || "")));
     return {
       product: {
         ...item,

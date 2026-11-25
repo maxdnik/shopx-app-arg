@@ -24,6 +24,13 @@ export function storedARS(order: CustomerOrderView): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+/** Use the server's classification and explicit zero balances, never a coupon marker alone. */
+export function isBonifiedOrder(order: CustomerOrderView): boolean {
+  return order.bonified === true && order.totalUSD === 0
+    && (order.totalARS === undefined || order.totalARS === 0)
+    && (order.delivery?.paidARS == null || order.delivery.paidARS === 0);
+}
+
 function searchable(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 }

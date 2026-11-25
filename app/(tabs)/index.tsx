@@ -8,6 +8,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomNav } from "../../components/AppBottomNav";
+import { OpportunityCard } from "../../components/OpportunityCard";
+import { getOpportunities, type OpportunitiesPage } from "../../lib/opportunities";
 import { StorefrontProductCard } from "../../components/StorefrontProductCard";
 import { useCartCount } from "../../hooks/useCartCount";
 import { getStoredUser } from "../../lib/auth";
@@ -18,13 +20,6 @@ import { getStorefrontExchangeRate, getWantItProducts, visibleStorefrontProducts
 import { getOfficialStores, type ShopXStore } from "../../lib/stores";
 import { canUseRemoteStoreLogo, getStoreLogoSource, getStoreLogoWordmark } from "../../lib/store-logos";
 import { buildApiUrl } from "../../lib/config";
-
-// Same campaign artwork and collection destinations as the ShopX website.
-const campaigns = [
-  { slug: "regalos-para-mama", title: "Regalos para mamá", image: "/campaigns/mama-2026-no-logo.webp" },
-  { slug: "marcas-que-queres", title: "Marcas que querés", image: "/campaigns/marcas-2026-no-logo.webp" },
-  { slug: "tu-proximo-upgrade", title: "Tu próximo upgrade", image: "/campaigns/upgrade-2026-no-logo.webp" },
-];
 
 const shortcuts = [
   { label: "Ropa", image: require("../../assets/images/home/gap.jpg"), category: "clothing" },
@@ -46,6 +41,7 @@ export default function HomeScreen() {
   const cartCount = useCartCount();
   const [stores, setStores] = useState<ShopXStore[]>([]);
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunitiesPage>();
   const [content, setContent] = useState<HomeContent>();
   const [products, setProducts] = useState<ShopXProduct[]>([]);
   const [exchangeRate, setExchangeRate] = useState<number>();
@@ -71,6 +67,7 @@ export default function HomeScreen() {
       }),
       getCatalogNavigation().then((value) => { if (id === generation.current) setCategories(value); }),
       getHomeContent(force).then((value) => { if (id === generation.current) setContent(value); }),
+      getOpportunities({ home: true }).then((value) => { if (id === generation.current) setOpportunities(value); }),
       getStorefrontExchangeRate().then((rate) => { if (id === generation.current) setExchangeRate(rate); }).catch(() => {
         // Keep the exact server USD price if the current FX rate is unavailable.
         if (id === generation.current) setExchangeRate(undefined);
@@ -87,6 +84,7 @@ export default function HomeScreen() {
     return () => { active = false; };
   }, []));
   const search = () => router.push({ pathname: "/search", params: { q: query.trim() } });
+  const campaigns = (content?.campaigns || []).filter(campaign => /^[a-z0-9-]+$/.test(campaign.slug) && campaign.image.startsWith("/campaigns/"));
   const weeklyProducts = visibleStorefrontProducts(content?.weeklyProducts || []).slice(0, 6);
 
   return (
@@ -121,6 +119,10 @@ export default function HomeScreen() {
               <View style={s.heroButton}><Text style={s.heroButtonText}>Descubrí más</Text><Feather name="arrow-right" size={16} color="#082A49" /></View>
             </View>
           </TouchableOpacity>
+          <View style={s.purchasePaths}>
+            <TouchableOpacity accessibilityRole="button" style={s.purchasePath} onPress={() => router.push("/search")}><Feather name="search" size={19} color="#087C91" /><Text style={s.purchasePathLabel}>Explorar productos</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={s.purchasePath} onPress={() => router.push("/quote")}><Feather name="link" size={19} color="#087C91" /><Text style={s.purchasePathLabel}>Cotizar un link</Text></TouchableOpacity>
+          </View>
           <View style={s.shortcuts}>
             {shortcuts.map((item) => (
               <TouchableOpacity key={item.label} style={s.shortcut} accessibilityRole="button" accessibilityLabel={`Ver ${item.label}`} onPress={() => item.store
@@ -143,6 +145,15 @@ export default function HomeScreen() {
           {products.length > 0 ? <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail} snapToInterval={cardWidth + 12} decelerationRate="fast">
             {products.slice(0, 8).map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
           </ScrollView> : null}
+          {!!opportunities?.items.length && <View style={s.weekly}>
+            <View style={s.sectionHeader}>
+              <Text accessibilityRole="header" style={s.sectionTitle}>Oportunidades ShopX</Text>
+              <TouchableOpacity style={s.moreButton} accessibilityRole="button" accessibilityLabel="Ver todas las oportunidades" onPress={() => router.push("/opportunities")}><Text style={s.more}>Ver todo</Text><Feather name="arrow-right" size={16} color="#087C91" /></TouchableOpacity>
+            </View>
+            <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.productRail} snapToInterval={Math.min(310, shellWidth - 50) + 12} decelerationRate="fast">
+              {opportunities.items.map(item => <View key={item.id} style={{ width: Math.min(310, shellWidth - 50) }}><OpportunityCard opportunity={item} /></View>)}
+            </ScrollView>
+          </View>}
           <View style={[s.sectionHeader, s.brandHeader]}>
             <Text accessibilityRole="header" style={s.sectionTitle}>Tus marcas favoritas</Text>
             <TouchableOpacity style={s.moreButton} accessibilityRole="button" accessibilityLabel="Ver todas las marcas" onPress={() => router.push("/stores")}><Text style={s.more}>Ver todo</Text><Feather name="arrow-right" size={16} color="#087C91" /></TouchableOpacity>
@@ -178,7 +189,7 @@ export default function HomeScreen() {
               {weeklyProducts.map((product) => <View key={product.slug} style={{ width: cardWidth }}><StorefrontProductCard product={product} exchangeRate={exchangeRate} /></View>)}
             </ScrollView>
           </View> : null}
-          <View style={s.weekly}>
+          {campaigns.length > 0 ? <View style={s.weekly}>
             <View style={s.sectionHeader}><Text accessibilityRole="header" style={s.sectionTitle}>Colecciones destacadas</Text></View>
             <ScrollView horizontal style={s.rail} showsHorizontalScrollIndicator={false} contentContainerStyle={s.campaignRail} snapToInterval={Math.min(280, shellWidth - 64) + 12} decelerationRate="fast">
               {campaigns.map((campaign) => <TouchableOpacity key={campaign.slug} style={[s.campaignCard, { width: Math.min(280, shellWidth - 64) }]} accessibilityRole="button" accessibilityLabel={`Explorar ${campaign.title}`} activeOpacity={0.9} onPress={() => {
@@ -187,7 +198,7 @@ export default function HomeScreen() {
                 <Image source={{ uri: buildApiUrl(campaign.image) }} style={s.campaignImage} contentFit="contain" cachePolicy="memory-disk" accessibilityLabel={campaign.title} />
               </TouchableOpacity>)}
             </ScrollView>
-          </View>
+          </View> : null}
           {Object.entries(sectionLabels).map(([key, label]) => {
             const items = visibleStorefrontProducts(content?.sections?.[key] || []);
             if (!items.length) return null;
@@ -218,6 +229,9 @@ export default function HomeScreen() {
 }
 
 const s = StyleSheet.create({
+  purchasePaths: { flexDirection: "row", paddingHorizontal: 16, gap: 10, marginTop: 12 },
+  purchasePath: { flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", alignItems: "center", backgroundColor: "#EAFBFD", borderRadius: 13, minHeight: 48, paddingHorizontal: 8 },
+  purchasePathLabel: { color: "#082A49", fontSize: 12, fontWeight: "800", flexShrink: 1 },
   app: { flex: 1, backgroundColor: "#F8FAFC" },
   shell: { alignSelf: "center" },
   header: { paddingHorizontal: 20, height: 56, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },

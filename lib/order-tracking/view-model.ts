@@ -17,6 +17,8 @@ export type CustomerDelivery = {
   purchases: { purchased: boolean; at: string | null }[];
 };
 export type CustomerOrderView = {
+  agpTracking?: import("./globallpack").AgpPublicShipment[];
+  bonified?: boolean;
   _id: string; orderNumber?: string; status: string; totalUSD: number;
   totalARS?: number; paidAt?: string | null; paymentStatus?: string;
   createdAt?: string | null; updatedAt?: string | null;

@@ -1,4 +1,4 @@
-import { listStatus, orderGroup, storedARS } from "../../lib/order-tracking/list-model";
+import { isBonifiedOrder, listStatus, orderGroup, storedARS } from "../../lib/order-tracking/list-model";
 import { dateLabel, variantLabels } from "../../lib/order-tracking/view-model";
 import { OrderShipments } from "../../components/OrderShipments";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -19,6 +19,7 @@ import {
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { formatUSD } from "../../lib/api";
 import { buildApiUrl, SHOPX_WHATSAPP_URL } from "../../lib/config";
+import { mercadoPagoUrl, samePaymentAmount } from "../../lib/payment-handoff";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { fetchCurrentUser, getStoredUser, ShopXUser } from "../../lib/auth";
 import {
@@ -42,7 +43,7 @@ const orangeSoft = "#FFF7E6";
 const red = "#DC2626";
 
 function isCancelled(order: AppOrder) { return orderGroup(order) === "cancelled"; }
-function isPendingPayment(order: AppOrder) { return order.status === "pending_payment" && !isCancelled(order); }
+function isPendingPayment(order: AppOrder) { return order.status === "pending_payment" && !isCancelled(order) && !isBonifiedOrder(order); }
 function getStatusLabel(order: AppOrder) { return listStatus(order).label; }
 function getStatusDescription(order: AppOrder) { return listStatus(order).description; }
 function getStatusStyle(order: AppOrder) {
@@ -207,7 +208,7 @@ export default function OrderDetailScreen() {
   }, [id]);
 
   async function handlePayPendingOrder() {
-    if (!order || !user || checkoutLoading) return;
+    if (!order || !user || checkoutLoading || !isPendingPayment(order)) return;
 
     try {
       setCheckoutLoading(true);
@@ -217,16 +218,14 @@ export default function OrderDetailScreen() {
         email: user.email,
         phone: user.phone || "",
         exchangeRate: order.exchangeRateUsed,
+        expectedTotalARS: order.totalARS,
       });
 
-      const checkoutUrl =
-        checkoutResponse.init_point || checkoutResponse.sandbox_init_point;
-
-      if (!checkoutUrl) {
-        throw new Error("Mercado Pago no devolvió un link de pago.");
+      if (!samePaymentAmount(order.totalARS ?? 0, checkoutResponse.totalARS)) {
+        await loadOrder({ silent: true });
+        throw new Error("El importe del pedido se actualizó. Revisalo antes de volver a pagar.");
       }
-
-      await Linking.openURL(checkoutUrl);
+      await Linking.openURL(mercadoPagoUrl(checkoutResponse));
     } catch (error: any) {
       console.log("ERROR PAY PENDING ORDER:", error);
 
@@ -484,7 +483,7 @@ export default function OrderDetailScreen() {
             </View>
 
             <View style={styles.heroMetaTotalBlock}>
-              <Text style={styles.heroMetaLabel}>Total</Text>
+              <Text style={styles.heroMetaLabel}>{isBonifiedOrder(order) ? "Bonificado" : "Total"}</Text>
               <Text style={styles.heroMetaValue}>
                 USD {formatUSD(order.totalUSD)}
               </Text>
@@ -627,7 +626,7 @@ export default function OrderDetailScreen() {
           <View style={styles.totalDivider} />
 
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total final</Text>
+            <Text style={styles.totalLabel}>{isBonifiedOrder(order) ? "Pedido bonificado" : "Total final"}</Text>
 
             <View style={styles.totalAmountBlock}>
               <Text style={styles.totalAmount}>

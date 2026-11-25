@@ -5,6 +5,7 @@ import type { AppOrder } from "../lib/orders";
 import { currentShipmentState, localDeliveryLabel, localDeliveryRows, type LocalDeliveryRow } from "../lib/order-tracking/detail-shipping";
 import { isCorreoArgentino } from "../lib/order-tracking/local-tracking";
 import { localRegistrationDate } from "../lib/order-tracking/local-registration";
+import { customerAgpTracking } from "../lib/order-tracking/globallpack";
 import { dateLabel, etaHint, etaText, isDirectOrder, publicTrackingUrl, purchaseComplete, shipmentLabel, stageDate, stageOf, validInbound, type DeliveryRow } from "../lib/order-tracking/view-model";
 
 type Icon = ComponentProps<typeof Feather>["name"];
@@ -165,6 +166,25 @@ function PartialShipments({ order }: { order: AppOrder }) {
   </View>;
 }
 
+function AndreaniShipments({ order }: { order: AppOrder }) {
+  const shipments = customerAgpTracking(order.agpTracking);
+  if (!shipments.length) return null;
+  return <View style={s.card}>
+    <Text accessibilityRole="header" style={s.title}>Tus envíos con Andreani</Text>
+    {shipments.map(shipment => <View key={shipment.number} style={s.shipment}>
+      <Text style={s.heading}>Envío {shipment.number}</Text>
+      <TrackingNumber number={shipment.number} />
+      {shipment.events.length ? <Accordion title={`Ver movimientos (${shipment.events.length})`}>
+        {shipment.events.map((event, index) => <View key={`${event.date}-${index}`} style={s.event}>
+          <Text style={s.date}>{event.date}</Text>
+          <Text style={event.needsAttention ? s.warningText : s.value}>{event.status}</Text>
+          {event.needsAttention ? <Text style={s.warningText}>Estamos revisando una incidencia.</Text> : null}
+        </View>)}
+      </Accordion> : <Text style={s.text}>Prealerta registrada. Las novedades aparecerán cuando el operador las informe.</Text>}
+    </View>)}
+  </View>;
+}
+
 const stages: { stage: number; title: string; icon: Icon; done: string; pending: string }[] = [
   { stage: 3, title: "Recibido en depósito Miami", icon: "home", done: "Tu paquete llegó a nuestro depósito en Miami.", pending: "Recibiremos tu paquete en el depósito de Miami." },
   { stage: 4, title: "Vuelo a Argentina", icon: "navigation", done: "Tu paquete fue enviado desde Miami hacia Argentina.", pending: "Tu paquete viajará desde Miami hacia Argentina." },
@@ -225,6 +245,7 @@ export function OrderShipments({ order, onRefresh, refreshing = false }: { order
       </Accordion> : null}
     </View>
     <PartialShipments order={order} />
+    <AndreaniShipments order={order} />
   </>;
 }
 

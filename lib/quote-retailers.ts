@@ -1,5 +1,5 @@
-// Shared client URL rules mirrored from usa-shopbox/src/lib/retailers/registry.ts.
-// Pricing and provider integrations remain on the ShopX server.
+// Shared URL identity rules from usa-shopbox (41b7aaa, 2026-11-25).
+// Preserve the customer's exact merchant/offer; pricing stays on the server.
 export type BrightDataRetailerKey =
   | "amazon"
   | "walmart"
@@ -18,7 +18,6 @@ export type BrightDataRetailerDefinition = {
   hosts: readonly string[];
   defaultDatasetId: string;
   datasetEnv: string;
-  zipcodeEnv?: string;
   zipcodeInput?: "zipcode" | "location";
 };
 
@@ -30,7 +29,6 @@ export const BRIGHTDATA_RETAILERS: readonly BrightDataRetailerDefinition[] = [
     hosts: ["amazon.com", "a.co"],
     defaultDatasetId: "gd_l7q7dkf244hwjntr0",
     datasetEnv: "BRIGHTDATA_AMAZON_DATASET_ID",
-    zipcodeEnv: "BRIGHTDATA_AMAZON_ZIPCODE",
     zipcodeInput: "zipcode",
   },
   {
@@ -40,6 +38,7 @@ export const BRIGHTDATA_RETAILERS: readonly BrightDataRetailerDefinition[] = [
     hosts: ["walmart.com"],
     defaultDatasetId: "gd_l95fol7l1ru6rlo116",
     datasetEnv: "BRIGHTDATA_WALMART_DATASET_ID",
+    zipcodeInput: "zipcode",
   },
   {
     key: "target",
@@ -48,7 +47,6 @@ export const BRIGHTDATA_RETAILERS: readonly BrightDataRetailerDefinition[] = [
     hosts: ["target.com"],
     defaultDatasetId: "gd_ltppk5mx2lp0v1k0vo",
     datasetEnv: "BRIGHTDATA_TARGET_DATASET_ID",
-    zipcodeEnv: "BRIGHTDATA_TARGET_ZIPCODE",
     zipcodeInput: "zipcode",
   },
   {
@@ -187,6 +185,7 @@ export function extractEbayLegacyItemId(value: string): string {
       parsed.searchParams.get("item") ||
       parsed.searchParams.get("itemId") ||
       parsed.searchParams.get("item_id") ||
+      parsed.searchParams.get("iid") ||
       ""
     );
   } catch {
@@ -259,6 +258,34 @@ export function isSupportedBrightDataRetailerUrl(value: string): boolean {
   return Boolean(detectBrightDataRetailer(value));
 }
 
+const AMAZON_OFFER_SELECTOR = /^(?:smid|m|seller|sellerId|selectedSellerId|merchantId|offer|offerId|offerListingId|selectedOfferId|size|color|variant|variantId)$/i;
+
+export function amazonUrlRequestsOneUnit(value: string): boolean {
+  try {
+    return Array.from(new URL(withProtocol(value)).searchParams)
+      .every(([key, qty]) => !/^(quantity|qty)$/i.test(key) || qty === "1");
+  } catch { return false; }
+}
+
+export function hasExplicitAmazonOffer(value: string): boolean {
+  try {
+    return Array.from(new URL(withProtocol(value)).searchParams)
+      .some(([key, selected]) => AMAZON_OFFER_SELECTOR.test(key) && !!selected);
+  } catch {
+    return false;
+  }
+}
+
+export function canonicalAmazonOfferUrl(value: string, asin: string): string {
+  const canonical = new URL(`https://www.amazon.com/dp/${asin}`);
+  const input = new URL(withProtocol(value));
+  for (const [key, selected] of input.searchParams) {
+    if (selected && AMAZON_OFFER_SELECTOR.test(key)) canonical.searchParams.append(key, selected);
+  }
+  canonical.searchParams.sort();
+  return canonical.href;
+}
+
 export function normalizeRetailerUrl(value: string): string {
   const parsed = new URL(withProtocol(value));
   const retailer = detectBrightDataRetailer(parsed.toString());
@@ -267,7 +294,7 @@ export function normalizeRetailerUrl(value: string): string {
 
   if (retailer?.key === "amazon") {
     const asin = extractAmazonAsin(parsed.toString());
-    if (asin) return `https://www.amazon.com/dp/${asin}`;
+    if (asin) return canonicalAmazonOfferUrl(value, asin);
   }
 
   if (retailer?.key === "ebay") {
@@ -300,6 +327,7 @@ export function normalizeRetailerUrl(value: string): string {
   }
 
   for (const key of Array.from(parsed.searchParams.keys())) {
+    if (retailer?.key === "walmart" && /^(?:smid|loc|storeid)$/i.test(key)) continue;
     if (
       key.toLowerCase() === "quantity" ||
       key.toLowerCase() === "qty" ||
@@ -365,10 +393,12 @@ export function retailerProductIdsFromUrl(value: string): string[] {
           .reverse()
           .map((segment) => segment.replace(/\.p$/i, ""))
           .find((segment) => /^\d{5,}$/.test(segment));
+        const querySku = parsed.searchParams.get("skuId") || parsed.searchParams.get("sku");
+        // Open-box and seller-selected offers do not identify the new, default SKU.
+        if ((querySku && pathId && querySku !== pathId) ||
+            Array.from(parsed.searchParams.keys()).some(key => /^(condition|buyingOption|openBox|offerId|sellerId|selectedOfferId)$/i.test(key))) return [];
         return uniqueProductIds([
-          parsed.searchParams.get("skuId"),
-          parsed.searchParams.get("sku"),
-          pathId,
+          querySku, pathId, parsed.pathname.match(/^\/product\/[^/]+\/(J[A-Z0-9]{9})\/?$/i)?.[1],
         ]);
       }
 
@@ -443,6 +473,9 @@ export function retailerProductKey(value: string): string {
     const retailer = detectBrightDataRetailer(normalized.toString());
     const productIds = retailerProductIdsFromUrl(normalized.toString());
     if (retailer && productIds.length) {
+      if ((retailer.key === "amazon" || retailer.key === "walmart") && normalized.search) {
+        return `${retailer.key}:${productIds[0]}:${normalized.search}`;
+      }
       if (retailer.key === "ebay") {
         const variation = normalized.searchParams.get("var");
         return `${retailer.key}:${productIds[0]}:${variation || "default"}`;
@@ -462,4 +495,3 @@ export function retailerProductKey(value: string): string {
 export function storeNameForUrl(value: string): string {
   return detectBrightDataRetailer(value)?.store || "Tienda USA";
 }
-
