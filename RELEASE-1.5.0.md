@@ -13,9 +13,9 @@ Actualización de la app para incorporar los cambios recientes de la web. Fecha 
 
 ## Dependencia del backend
 
-Esta versión necesita los cambios de [usa-shopbox, PR #523](https://github.com/maxdnik/usa-shopbox/pull/523), incluidos los contratos móviles de contenido y oportunidades, precios y cupones, recuperación de canjes y dirección completa. El PR debe superar su CI y quedar integrado y desplegado antes de distribuir la app con estos flujos. Estas notas no dan por realizada su integración.
+Esta versión usa los cambios de [usa-shopbox, PR #523](https://github.com/maxdnik/usa-shopbox/pull/523), incluidos los contratos móviles de contenido y oportunidades, precios y cupones, recuperación de canjes y dirección completa. El PR superó todo su CI y quedó integrado. Se verificó que `/api/version` de producción devuelve el commit `724e45168a58e981ab39704340a1c1f277860a97`.
 
-Las transacciones de MongoDB, la atomicidad del consumo del cupón y los reintentos se verificaron con mocks. Queda pendiente comprobarlos con un entorno de MongoDB que soporte transacciones, además del CI del backend.
+Además de las pruebas aisladas, se aprobaron cuatro escenarios con modelos y transacciones reales en un MongoDB replica set de CI: creación y recuperación, concurrencia con la misma clave, dos claves que compiten por un uso y rollback cuando falla el consumo. La autenticación, la cotización externa y la entrega de correo se simulan; no se generan compras ni cobros de producción. [CI del backend y transacciones](https://github.com/maxdnik/usa-shopbox/actions/runs/45665922910).
 
 ## Validación
 
@@ -27,6 +27,8 @@ Las transacciones de MongoDB, la atomicidad del consumo del cupón y los reinten
 | Pruebas automáticas | 61/61: 24 anteriores, 14 de cuenta y carrito, 13 de catálogo, 10 de checkout |
 | Exportación Expo | iOS, Android y web aprobados |
 | ESLint de los archivos revisados | Sin errores ni advertencias |
+| Compilaciones nativas EAS | iOS y Android aprobados |
+| Carga de iOS a App Store Connect | Falló; requiere consultar el error en Expo |
 
 La exportación de Expo comprueba los bundles y recursos; no genera por sí sola un binario nativo firmado ni acredita una publicación en las tiendas.
 
@@ -35,6 +37,8 @@ La exportación de Expo comprueba los bundles y recursos; no genera por sí sola
 Se mantienen Expo SDK 54, Google y Apple nativos, los identificadores `com.maximodimnik.shopx` de iOS y Android y la configuración existente del proyecto y perfiles EAS.
 
 El workflow [release-1.5.0.yml](.eas/workflows/release-1.5.0.yml), asociado a la rama `release/shopx-1.5.0`, ejecuta la verificación, construye iOS y Android y sube la compilación iOS a App Store Connect. La carga a App Store Connect no publica automáticamente en App Store. El workflow no configura un envío a Google Play.
+
+En la [ejecución de esta versión](https://expo.dev/accounts/maxdnik/projects/shopx/workflows/01a213b8-31d8-7a36-8fa0-899e90a59884), la verificación y ambas compilaciones terminaron correctamente. El [job de carga a Apple](https://expo.dev/accounts/maxdnik/projects/shopx/workflows/01a213b8-31d8-7a36-8fa0-899e90a59884#job-01a213c0-112e-7e1e-bded-280f17b8c80c) terminó con error; GitHub solo informa `Job has errored.`. No se determinó la causa porque no hay una sesión autenticada de Expo disponible para consultar el detalle. No se reintentó sin diagnóstico y no se publicó la actualización en las tiendas.
 
 ## QA pendiente en dispositivos
 
