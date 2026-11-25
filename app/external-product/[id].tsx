@@ -1,6 +1,7 @@
 import {
   basketCartProducts,
   calculateQuoteBasket,
+  canCheckoutBasket,
   QuoteBasket,
 } from "../../lib/quote-basket";
 import { PriceSummary } from "../../components/PriceSummary";
@@ -21,6 +22,7 @@ import {
 import { addProductsToCart } from "../../lib/cart-store";
 import { formatUSD } from "../../lib/api";
 import { buildApiUrl } from "../../lib/config";
+import { amazonSelectionUrl, initialAmazonSelection } from "../../lib/external-product-selection";
 
 const navy = "#082A4D";
 const muted = "#617590";
@@ -187,6 +189,9 @@ export default function ExternalProductScreen() {
   const [added, setAdded] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
+    setProduct(null); setSelected({}); setQuote(undefined); setError(""); setAdded(false); setActiveImage(fallbackImage);
+    setLoading(source === "amazon" && !!sourceUrl);
     if (source !== "amazon" || !sourceUrl) return;
     (async () => {
       try {
@@ -194,22 +199,26 @@ export default function ExternalProductScreen() {
           buildApiUrl(
             `/api/app/external-product?source=amazon&url=${encodeURIComponent(sourceUrl)}`,
           ),
+          { signal: controller.signal },
         );
         if (!response.ok) throw new Error("detail request failed");
         const data = await response.json();
+        if (controller.signal.aborted) return;
         setProduct(data.product);
         const images = collectImages(data.product?.images || data.product);
         if (images[0]) setActiveImage(images[0]);
       } catch (err) {
+        if (controller.signal.aborted) return;
         console.log("EXTERNAL PRODUCT ERROR", err);
         setError(
           "No pudimos cargar todas las opciones. Podés abrir la publicación original.",
         );
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     })();
-  }, [source, sourceUrl]);
+    return () => controller.abort();
+  }, [source, sourceUrl, fallbackImage]);
 
   const amazon = useMemo(() => buildAmazonData(product), [product]);
   const selectedCombination = useMemo(
@@ -219,12 +228,9 @@ export default function ExternalProductScreen() {
 
   useEffect(() => {
     if (!product || Object.keys(selected).length) return;
-    const defaults: Record<string, string> = {};
-    Object.entries(amazon.groups).forEach(([key, values]) => {
-      if (values[0]) defaults[key] = values[0];
-    });
-    setSelected(defaults);
-  }, [product, amazon.groups, selected]);
+    const defaults = initialAmazonSelection(amazon.matrix, sourceUrl);
+    if (Object.keys(defaults).length) setSelected(defaults);
+  }, [product, amazon.matrix, sourceUrl, selected]);
 
   useEffect(() => {
     const images = selectedCombination?.images?.length
@@ -245,32 +251,29 @@ export default function ExternalProductScreen() {
   }, [selectedCombination, product, fallbackImage]);
 
   const hasOptions = Object.keys(amazon.groups).length > 0;
-  const variantUrlKnown =
-    !!selectedCombination?.url ||
-    /^[A-Z0-9]{10}$/.test(selectedCombination?.sku || "");
+  const selectedUrl = source === "amazon"
+    ? amazonSelectionUrl(sourceUrl, selectedCombination)
+    : sourceUrl;
+  const variantUrlKnown = !!selectedUrl;
   const selectionReady =
-    !error &&
+    !error && product?.available !== false &&
     (!hasOptions ||
       (!!selectedCombination &&
         variantUrlKnown &&
         selectedCombination.available !== false &&
         Object.keys(amazon.groups).every((key) => selected[key])));
-  const selectedUrl =
-    selectedCombination?.url ||
-    (source === "amazon" &&
-    /^[A-Z0-9]{10}$/.test(selectedCombination?.sku || "")
-      ? `https://www.amazon.com/dp/${selectedCombination.sku}`
-      : sourceUrl);
   useEffect(() => {
     if (!selectedUrl || loading || !selectionReady) {
       setQuote(undefined);
+      setPricingLoading(false);
       return;
     }
     let active = true;
+    const controller = new AbortController();
     setPricingLoading(true);
     setPricingError("");
     setQuote(undefined);
-    calculateQuoteBasket([selectedUrl])
+    calculateQuoteBasket([selectedUrl], undefined, controller.signal)
       .then((result) => {
         if (active) setQuote(result);
       })
@@ -287,6 +290,7 @@ export default function ExternalProductScreen() {
       });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [selectedUrl, loading, selectionReady]);
   const finalPrice = quote?.pricing.totalFinal || 0;
@@ -312,8 +316,7 @@ export default function ExternalProductScreen() {
       !selectionReady ||
       pricingLoading ||
       adding ||
-      quote.errors?.length ||
-      quote.pricing.checkoutEnabled === false
+      !canCheckoutBasket(quote)
     )
       return;
     setAdding(true);
@@ -530,11 +533,10 @@ export default function ExternalProductScreen() {
             pricingLoading ||
             adding ||
             !selectionReady ||
-            !!quote.errors?.length ||
-            quote.pricing.checkoutEnabled === false
+            !canCheckoutBasket(quote)
           }
         >
-          <Text style={styles.addText}>Agregar al carrito</Text>
+          <Text style={styles.addText}>{product?.available === false || selectedCombination?.available === false ? "No disponible" : "Agregar al carrito"}</Text>
         </TouchableOpacity>
       </View>
 

@@ -1,6 +1,8 @@
 // lib/orders.ts
 import { getAuthToken } from "./auth";
 import { buildApiUrl } from "./config";
+import { ApiError, request } from "./request";
+import type { PurchaseTermsInput } from "./purchase-terms";
 import type { CustomerDelivery, CustomerOrderView } from "./order-tracking/view-model";
 import type { LocalTracking } from "./order-tracking/local-tracking";
 
@@ -13,6 +15,10 @@ export type AppOrderBuyer = {
   city?: string;
   address?: string;
   postalCode?: string;
+  streetName?: string;
+  streetNumber?: string;
+  floor?: string;
+  apartment?: string;
 };
 
 export type AppOrderDestination = {
@@ -92,6 +98,7 @@ export type CreateAppOrderPayload = {
 
 export type CreateMercadoPagoCheckoutPayload = {
   expectedTotalARS?: number;
+  termsAcceptance?: PurchaseTermsInput;
   /** Para pagar una orden existente desde pantalla de pedido. */
   orderId?: string;
   orderNumber?: string;
@@ -118,6 +125,9 @@ export type CreateMercadoPagoCheckoutPayload = {
 };
 
 export type AppOrder = {
+  bonified?: boolean;
+  fulfillmentMode?: "single" | "partial";
+  agpTracking?: import("./order-tracking/globallpack").AgpPublicShipment[];
   partialShipments?: CustomerOrderView["partialShipments"];
   delivery?: CustomerDelivery;
   localTracking?: LocalTracking | null;
@@ -140,6 +150,8 @@ export type AppOrder = {
   totalUSD: number;
   totalARS?: number;
   exchangeRateUsed?: number;
+  officialExchangeRateUsed?: number;
+  fiscalExchangeRateUsed?: number;
 
   pricingBreakdown?: PricingBreakdownRow[];
 
@@ -213,7 +225,13 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   }
 
   if (!response.ok || data?.ok === false) {
-    throw new Error(data?.error || data?.message || "Error de servidor");
+    throw new ApiError(
+      response.status === 401
+        ? "Tu sesión venció. Volvé a iniciar sesión."
+        : data?.error || data?.message || "Error de servidor",
+      response.status,
+      data || {},
+    );
   }
 
   return data as T;
@@ -350,19 +368,13 @@ export async function getAppOrderById(params: {
 export async function createMercadoPagoCheckout(
   params: CreateMercadoPagoCheckoutPayload,
 ): Promise<MercadoPagoCheckoutResponse> {
-  const authHeaders = await getAuthHeaders();
-
-  const response = await fetch(buildApiUrl("/api/app/checkout/mercadopago"), {
+  return request<MercadoPagoCheckoutResponse>("/api/app/checkout/mercadopago", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-    },
-    body: JSON.stringify({
+    authenticated: true,
+    timeoutMs: 210000,
+    body: {
       ...params,
       email: params.email ? cleanEmail(params.email) : undefined,
-    }),
+    },
   });
-
-  return parseJsonResponse<MercadoPagoCheckoutResponse>(response);
 }

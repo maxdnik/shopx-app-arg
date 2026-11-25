@@ -27,7 +27,10 @@ import { ScreenHeader } from "../../components/ScreenHeader";
 import { useFavorites } from "../../hooks/useFavorites";
 import { AppOrder, getAppOrders } from "../../lib/orders";
 import { GOOGLE_AUTH_CONFIG } from "../../lib/google-auth-config";
-import { SHOPX_WHATSAPP_URL } from "../../lib/config";
+import { buildApiUrl, SHOPX_WHATSAPP_URL } from "../../lib/config";
+import { getCuitValidationError, isValidAccountEmail, normalizeCuit, validatePassword } from "../../lib/account-validation";
+import { ACCOUNT_TERMS_ERROR, ACCOUNT_TERMS_LABEL, PURCHASE_TERMS_URL, purchaseTermsInput } from "../../lib/purchase-terms";
+import { isValidPostalCode, localityKey, lookupPostalDestination, matchPostalLocality, normalizePostalCode, resolvePostalSelection, type PostalDestination } from "../../lib/postal-destination";
 import {
   CheckoutProfile,
   fetchCurrentUser,
@@ -42,6 +45,8 @@ import {
   ShopXUser,
   updateAppAccount,
   forgotPasswordApp,
+  resendVerificationApp,
+  AuthApiError,
 } from "../../lib/auth";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -108,7 +113,7 @@ function getInitial(user: ShopXUser | null) {
 function getMissingLabel(field: string) {
   const labels: Record<string, string> = {
     phone: "Teléfono",
-    dni: "DNI / CUIT",
+    dni: "CUIT/CUIL",
     streetName: "Calle",
     streetNumber: "Número",
     city: "Ciudad",
@@ -237,8 +242,9 @@ export default function ProfileScreen() {
 
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
-  const [registerPhone, setRegisterPhone] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
+  const [acceptedRegistrationTerms, setAcceptedRegistrationTerms] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
 
   const [formFullName, setFormFullName] = useState("");
   const [formPhone, setFormPhone] = useState("");
@@ -250,6 +256,54 @@ export default function ProfileScreen() {
   const [formCity, setFormCity] = useState("");
   const [formProvince, setFormProvince] = useState("");
   const [formPostalCode, setFormPostalCode] = useState("");
+  const [postalDestination, setPostalDestination] = useState<PostalDestination | null>(null);
+  const [postalLoading, setPostalLoading] = useState(false);
+  const [postalMessage, setPostalMessage] = useState("");
+  const [localityQuery, setLocalityQuery] = useState("");
+
+  useEffect(() => {
+    if (!editCheckoutData) return;
+    const code = normalizePostalCode(formPostalCode);
+    setPostalDestination(null);
+    setPostalLoading(false);
+    setPostalMessage("");
+    if (!code) return;
+    if (!isValidPostalCode(code)) {
+      setPostalMessage("Ingresá 4 números o un CPA completo.");
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setPostalLoading(true);
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    const debounce = setTimeout(() => {
+      lookupPostalDestination(code, controller.signal).then(destination => {
+        if (!active) return;
+        setPostalDestination(destination);
+        if (destination.status === "resolved" && destination.localities[0]) {
+          setFormCity(destination.localities[0].locality);
+          setFormProvince(destination.localities[0].province);
+        } else if (destination.province) {
+          setFormProvince(destination.province);
+        }
+        if (!destination.localities.length) setPostalMessage("No encontramos el código postal. Completá localidad y provincia.");
+      }).catch(() => {
+        if (active) setPostalMessage("No pudimos consultar el código postal. Completá localidad y provincia.");
+      }).finally(() => {
+        clearTimeout(timeout);
+        if (active) setPostalLoading(false);
+      });
+    }, 300);
+    return () => { active = false; clearTimeout(debounce); clearTimeout(timeout); controller.abort(); };
+  }, [formPostalCode, editCheckoutData]);
+
+  function changePostalCode(value: string) {
+    setFormPostalCode(normalizePostalCode(value));
+    setFormCity("");
+    setFormProvince("");
+    setLocalityQuery("");
+    setPostalDestination(null);
+  }
 
   const googleRedirectUri = AuthSession.makeRedirectUri({
     scheme: GOOGLE_AUTH_CONFIG.redirectScheme,
@@ -325,6 +379,7 @@ export default function ProfileScreen() {
   }
 
   async function handleForgotPassword() {
+    if (submitting || googleLoading || appleLoading) return;
     const email = loginEmail.trim();
 
     if (!email) {
@@ -347,6 +402,19 @@ export default function ProfileScreen() {
         "No pudimos enviar el email",
         error?.message || "Intentá nuevamente en unos minutos.",
       );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleResendVerification() {
+    if (submitting || googleLoading || appleLoading) return;
+    try {
+      setSubmitting(true);
+      const message = await resendVerificationApp(verificationEmail || loginEmail);
+      Alert.alert("Revisá tu email", message);
+    } catch (error) {
+      Alert.alert("Verificación", error instanceof Error ? error.message : "Intentá nuevamente.");
     } finally {
       setSubmitting(false);
     }
@@ -627,7 +695,7 @@ export default function ProfileScreen() {
   async function handleLogin() {
     if (submitting || googleLoading || appleLoading) return;
 
-    if (!loginEmail.trim() || !loginPassword) {
+    if (!isValidAccountEmail(loginEmail) || !loginPassword) {
       Alert.alert("Faltan datos", "Ingresá email y contraseña.");
       return;
     }
@@ -642,9 +710,13 @@ export default function ProfileScreen() {
 
       await hydrateAccountAfterAuth(loggedUser);
       setLoginPassword("");
+      setVerificationEmail("");
 
       Alert.alert("Sesión iniciada", "Ya podés comprar con tu cuenta ShopX.");
     } catch (error: any) {
+      if (error instanceof AuthApiError && error.code === "EMAIL_NOT_VERIFIED") {
+        setVerificationEmail(loginEmail.trim());
+      }
       Alert.alert(
         "No pudimos iniciar sesión",
         error?.message || "Revisá los datos e intentá nuevamente.",
@@ -662,33 +734,41 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (!registerEmail.trim()) {
+    if (!isValidAccountEmail(registerEmail)) {
       Alert.alert("Falta email", "Ingresá un email válido.");
       return;
     }
 
-    if (!registerPassword || registerPassword.length < 8) {
+    const passwordValidation = validatePassword(registerPassword);
+    if (!passwordValidation.valid) {
       Alert.alert(
         "Contraseña inválida",
-        "La contraseña debe tener al menos 8 caracteres.",
+        passwordValidation.errors.join(". "),
       );
+      return;
+    }
+
+    if (!acceptedRegistrationTerms) {
+      Alert.alert("Términos y Condiciones", ACCOUNT_TERMS_ERROR);
       return;
     }
 
     try {
       setSubmitting(true);
 
-      const registeredUser = await registerApp({
+      await registerApp({
         fullName: registerName,
         email: registerEmail,
-        phone: registerPhone,
         password: registerPassword,
+        termsAcceptance: purchaseTermsInput(acceptedRegistrationTerms),
       });
 
-      await hydrateAccountAfterAuth(registeredUser);
       setRegisterPassword("");
-
-      Alert.alert("Cuenta creada", "Ya podés comprar con tu cuenta ShopX.");
+      setLoginEmail(registerEmail.trim());
+      setVerificationEmail(registerEmail.trim());
+      setAcceptedRegistrationTerms(false);
+      setMode("login");
+      Alert.alert("Revisá tu email", "Si tu cuenta necesita verificación, vas a recibir un enlace para activarla. Después iniciá sesión.");
     } catch (error: any) {
       Alert.alert(
         "No pudimos crear la cuenta",
@@ -700,7 +780,7 @@ export default function ProfileScreen() {
   }
 
   async function handleSaveCheckoutData() {
-    if (savingProfile) return;
+    if (savingProfile || postalLoading) return;
 
     if (!formFullName.trim()) {
       Alert.alert("Falta nombre", "Ingresá tu nombre y apellido.");
@@ -712,8 +792,15 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (!formDni.trim()) {
-      Alert.alert("Falta DNI / CUIT", "Ingresá tu DNI o CUIT.");
+    const cuitError = getCuitValidationError(formDni);
+    if (cuitError) {
+      Alert.alert("Revisá tu CUIT/CUIL", cuitError);
+      return;
+    }
+
+    const destinationError = resolvePostalSelection(postalDestination, formPostalCode, formCity, formProvince);
+    if (destinationError) {
+      Alert.alert("Dirección de entrega", destinationError);
       return;
     }
 
@@ -738,7 +825,7 @@ export default function ProfileScreen() {
         fullName: formFullName,
         name: formFullName,
         phone: formPhone,
-        dni: formDni,
+        dni: normalizeCuit(formDni),
         address: {
           streetName: formStreetName,
           streetNumber: formStreetNumber,
@@ -746,15 +833,15 @@ export default function ProfileScreen() {
           apartment: formApartment,
           city: formCity,
           province: formProvince,
-          postalCode: formPostalCode,
+          postalCode: normalizePostalCode(formPostalCode),
         },
         billing: {
           fullName: formFullName,
-          dni: formDni,
+          dni: normalizeCuit(formDni),
           address: [formStreetName, formStreetNumber].filter(Boolean).join(" "),
           city: formCity,
           province: formProvince,
-          postalCode: formPostalCode,
+          postalCode: normalizePostalCode(formPostalCode),
         },
         arca: user?.arca || {
           enabled: false,
@@ -805,7 +892,8 @@ export default function ProfileScreen() {
           setLoginPassword("");
           setRegisterName("");
           setRegisterEmail("");
-          setRegisterPhone("");
+          setAcceptedRegistrationTerms(false);
+          setVerificationEmail("");
           setRegisterPassword("");
 
           setFormFullName("");
@@ -851,7 +939,8 @@ export default function ProfileScreen() {
               setLoginPassword("");
               setRegisterName("");
               setRegisterEmail("");
-              setRegisterPhone("");
+              setAcceptedRegistrationTerms(false);
+              setVerificationEmail("");
               setRegisterPassword("");
 
               setFormFullName("");
@@ -1051,8 +1140,9 @@ export default function ProfileScreen() {
 
                   <TextInput
                     value={formDni}
-                    onChangeText={setFormDni}
-                    placeholder="DNI / CUIT"
+                    onChangeText={value => setFormDni(normalizeCuit(value).slice(0, 11))}
+                    placeholder="CUIT/CUIL (11 dígitos)"
+                    accessibilityLabel="CUIT o CUIL de 11 dígitos"
                     placeholderTextColor="#8FA0B6"
                     style={styles.input}
                     keyboardType="number-pad"
@@ -1096,63 +1186,56 @@ export default function ProfileScreen() {
                   </View>
 
                   <TextInput
+                    value={formPostalCode}
+                    onChangeText={changePostalCode}
+                    placeholder="Código postal o CPA"
+                    accessibilityLabel="Código postal o CPA"
+                    placeholderTextColor="#8FA0B6"
+                    style={styles.input}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    maxLength={8}
+                  />
+                  {postalLoading ? <ActivityIndicator color={navy} accessibilityLabel="Buscando localidad" /> : null}
+                  {postalMessage ? <Text style={styles.postalHint}>{postalMessage}</Text> : null}
+                  {postalDestination && postalDestination.localities.length > 1 ? <View style={styles.localityBox}>
+                    <Text style={styles.provinceTitle}>Elegí tu localidad</Text>
+                    {postalDestination.localities.length > 6 ? <TextInput value={localityQuery} onChangeText={setLocalityQuery} placeholder="Buscar localidad" accessibilityLabel="Buscar localidad" style={styles.input} /> : null}
+                    <ScrollView nestedScrollEnabled style={styles.localityList} keyboardShouldPersistTaps="handled">
+                      {postalDestination.localities.filter(place => `${place.locality} ${place.province} ${place.department}`.toLocaleLowerCase("es-AR").includes(localityQuery.toLocaleLowerCase("es-AR"))).map(place => {
+                        const selected = matchPostalLocality(postalDestination, formCity, formProvince);
+                        const active = selected && localityKey(selected) === localityKey(place);
+                        return <TouchableOpacity key={localityKey(place)} accessibilityRole="radio" accessibilityState={{ selected: Boolean(active) }} style={[styles.localityOption, active && styles.localityOptionActive]} onPress={() => { setFormCity(place.locality); setFormProvince(place.province); setPostalDestination(current => current ? { ...current, selectedLocalityKey: localityKey(place) } : current); }}>
+                          <Feather name={active ? "check-circle" : "circle"} size={18} color={navy} />
+                          <View style={{ flex: 1 }}><Text style={styles.localityTitle}>{place.locality}</Text><Text style={styles.postalHint}>{[place.department, place.province].filter(Boolean).join(" · ")}</Text></View>
+                        </TouchableOpacity>;
+                      })}
+                    </ScrollView>
+                  </View> : null}
+                  <TextInput
                     value={formCity}
                     onChangeText={setFormCity}
-                    placeholder="Ciudad"
+                    placeholder="Localidad"
+                    accessibilityLabel="Localidad"
                     placeholderTextColor="#8FA0B6"
                     style={styles.input}
+                    editable={!postalDestination?.localities.length}
                   />
-
                   <Text style={styles.provinceTitle}>Provincia</Text>
-
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.provinceRow}
-                  >
-                    {provinces.map((province) => {
-                      const active = formProvince === province;
-
-                      return (
-                        <TouchableOpacity
-                          key={province}
-                          style={[
-                            styles.provincePill,
-                            active && styles.provincePillActive,
-                          ]}
-                          activeOpacity={0.88}
-                          onPress={() => setFormProvince(province)}
-                        >
-                          <Text
-                            style={[
-                              styles.provincePillText,
-                              active && styles.provincePillTextActive,
-                            ]}
-                          >
-                            {province}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-
-                  <TextInput
-                    value={formPostalCode}
-                    onChangeText={setFormPostalCode}
-                    placeholder="Código postal"
-                    placeholderTextColor="#8FA0B6"
-                    style={styles.input}
-                    keyboardType="number-pad"
-                  />
+                  {postalDestination?.localities.length ? <Text style={styles.localityTitle}>{formProvince || "Elegí tu localidad"}</Text> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.provinceRow}>
+                    {provinces.map(province => <TouchableOpacity key={province} accessibilityRole="radio" accessibilityState={{ selected: formProvince === province }} style={[styles.provincePill, formProvince === province && styles.provincePillActive]} activeOpacity={0.88} onPress={() => setFormProvince(province)}>
+                      <Text style={[styles.provincePillText, formProvince === province && styles.provincePillTextActive]}>{province}</Text>
+                    </TouchableOpacity>)}
+                  </ScrollView>}
 
                   <TouchableOpacity
                     style={[
                       styles.saveButton,
-                      savingProfile && styles.buttonDisabled,
+                      (savingProfile || postalLoading) && styles.buttonDisabled,
                     ]}
                     activeOpacity={0.9}
                     onPress={handleSaveCheckoutData}
-                    disabled={savingProfile}
+                    disabled={savingProfile || postalLoading}
                   >
                     {savingProfile ? (
                       <ActivityIndicator color={white} />
@@ -1174,7 +1257,7 @@ export default function ProfileScreen() {
                   </View>
 
                   <View style={styles.previewRow}>
-                    <Text style={styles.previewLabel}>DNI / CUIT</Text>
+                    <Text style={styles.previewLabel}>CUIT/CUIL</Text>
                     <Text style={styles.previewValue}>
                       {user.dni || user.billing?.dni || "Pendiente"}
                     </Text>
@@ -1448,9 +1531,15 @@ export default function ProfileScreen() {
 
               {mode === "login" ? (
                 <>
+                  {verificationEmail ? <View style={styles.verificationBox}>
+                    <Text style={styles.postalHint}>Verificá tu email para iniciar sesión.</Text>
+                    <TouchableOpacity accessibilityRole="button" onPress={handleResendVerification} disabled={submitting || googleLoading || appleLoading} style={styles.verificationButton}>
+                      <Text style={styles.forgotPasswordText}>Reenviar enlace de verificación</Text>
+                    </TouchableOpacity>
+                  </View> : null}
                   <TextInput
                     value={loginEmail}
-                    onChangeText={setLoginEmail}
+                    onChangeText={value => { setLoginEmail(value); if (verificationEmail && value.trim() !== verificationEmail) setVerificationEmail(""); }}
                     placeholder="Email"
                     placeholderTextColor="#8FA0B6"
                     style={styles.input}
@@ -1521,15 +1610,6 @@ export default function ProfileScreen() {
                   />
 
                   <TextInput
-                    value={registerPhone}
-                    onChangeText={setRegisterPhone}
-                    placeholder="WhatsApp"
-                    placeholderTextColor="#8FA0B6"
-                    style={styles.input}
-                    keyboardType="phone-pad"
-                  />
-
-                  <TextInput
                     value={registerPassword}
                     onChangeText={setRegisterPassword}
                     placeholder="Contraseña"
@@ -1537,6 +1617,16 @@ export default function ProfileScreen() {
                     style={styles.input}
                     secureTextEntry
                   />
+                  <Text style={styles.postalHint}>8 caracteres, mayúscula, minúscula y número.</Text>
+                  <View style={styles.termsRow}>
+                    <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: acceptedRegistrationTerms }} accessibilityLabel={ACCOUNT_TERMS_LABEL} onPress={() => setAcceptedRegistrationTerms(value => !value)} style={styles.termsCheck}>
+                      <Feather name={acceptedRegistrationTerms ? "check-square" : "square"} size={23} color={navy} />
+                      <Text style={styles.termsText}>Acepto los</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity accessibilityRole="link" onPress={() => { void Linking.openURL(buildApiUrl(PURCHASE_TERMS_URL)).catch(() => Alert.alert("Términos y Condiciones", "No pudimos abrir el enlace. Volvé a intentar.")); }} style={styles.termsLink}>
+                      <Text style={styles.termsLinkText}>Términos y Condiciones</Text>
+                    </TouchableOpacity>
+                  </View>
 
                   <TouchableOpacity
                     style={[
@@ -1626,6 +1716,19 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  postalHint: { color: muted, fontSize: 12, lineHeight: 18 },
+  localityBox: { borderWidth: 1, borderColor: border, borderRadius: 14, padding: 12, gap: 8 },
+  localityList: { maxHeight: 210 },
+  localityOption: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 10, minHeight: 50 },
+  localityOptionActive: { backgroundColor: "#E8F6F8" },
+  localityTitle: { color: navy, fontSize: 14, lineHeight: 20, fontWeight: "700" },
+  verificationBox: { backgroundColor: "#E8F6F8", borderRadius: 14, padding: 12 },
+  verificationButton: { minHeight: 44, justifyContent: "center" },
+  termsRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" },
+  termsCheck: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44 },
+  termsText: { color: text, fontSize: 13 },
+  termsLink: { minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
+  termsLinkText: { color: navy, fontSize: 13, fontWeight: "700", textDecorationLine: "underline" },
   app: {
     flex: 1,
     backgroundColor: soft,

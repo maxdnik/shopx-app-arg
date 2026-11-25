@@ -509,6 +509,8 @@ export default function ProductDetailScreen() {
   const [resolvedSelectionProduct, setResolvedSelectionProduct] =
     useState<ShopXProduct | null>(null);
   const [variantPricingLoading, setVariantPricingLoading] = useState(false);
+  const [variantPricingError, setVariantPricingError] = useState("");
+  const [selectionRetry, setSelectionRetry] = useState(0);
 
   async function loadProduct(options?: { silent?: boolean }) {
     if (!routeSlug) {
@@ -600,6 +602,7 @@ export default function ProductDetailScreen() {
     if (!product || !optionGroups.length) {
       setResolvedSelectionProduct(null);
       setVariantPricingLoading(false);
+      setVariantPricingError("");
       return;
     }
 
@@ -616,6 +619,8 @@ export default function ProductDetailScreen() {
       if (!key) return;
 
       setVariantPricingLoading(true);
+      setVariantPricingError("");
+      setResolvedSelectionProduct(null);
 
       try {
         const destination = await getCurrentPricingDestination();
@@ -632,6 +637,7 @@ export default function ProductDetailScreen() {
         );
 
         if (cancelled) return;
+        if (!resolved[0]) throw new Error("No pudimos confirmar esa variante. Volvé a intentar.");
 
         const nextProduct = resolved[0]
           ? applySelectedProductOptions(
@@ -656,7 +662,10 @@ export default function ProductDetailScreen() {
         setResolvedSelectionProduct(nextProduct);
       } catch (error) {
         console.log("ERROR RESOLVE SELECTED VARIANT PRICING:", error);
-        if (!cancelled) setResolvedSelectionProduct(localProduct);
+        if (!cancelled) {
+          setResolvedSelectionProduct(null);
+          setVariantPricingError(error instanceof Error ? error.message : "No pudimos confirmar el precio de esa variante.");
+        }
       } finally {
         if (!cancelled) setVariantPricingLoading(false);
       }
@@ -672,10 +681,15 @@ export default function ProductDetailScreen() {
     product?.slug,
     selectedOptionsSignature,
     optionGroups.length,
+    selectionRetry,
   ]);
 
   const effectiveProduct =
     resolvedSelectionProduct || locallySelectedProduct || product;
+
+  const selectionVerified = !optionGroups.length || !!resolvedSelectionProduct;
+  const unavailable = effectiveProduct?.available === false || effectiveProduct?.selectedVariant?.available === false;
+  const purchaseBlocked = !selectionVerified || variantPricingLoading || !!variantPricingError || unavailable;
 
   const { isFavorite, updatingFavorite, toggleFavorite } =
     useFavoriteProduct(product);
@@ -719,7 +733,7 @@ export default function ProductDetailScreen() {
   }
 
   async function handleAddToCart() {
-    if (!product || addingToCart || variantPricingLoading) return;
+    if (!product || addingToCart || purchaseBlocked) return;
 
     setAddingToCart(true);
 
@@ -1031,7 +1045,7 @@ export default function ProductDetailScreen() {
         <View style={styles.trustGrid}>
           <TrustBadge
             icon="truck-delivery-outline"
-            title="5–10 días"
+            title="A domicilio"
             subtitle="A todo el país"
           />
           <TrustBadge
@@ -1099,13 +1113,14 @@ export default function ProductDetailScreen() {
         </View>
 
         <View style={styles.actionsBlock}>
+          {!!variantPricingError && <TouchableOpacity accessibilityRole="button" onPress={() => setSelectionRetry(value => value + 1)} style={{ paddingVertical: 12 }}><Text style={{ color: "#B42318", textAlign: "center" }}>{variantPricingError} Tocá para reintentar.</Text></TouchableOpacity>}
           <TouchableOpacity
             style={[
               styles.addToCartButton,
-              (addingToCart || variantPricingLoading) && styles.buttonDisabled,
+              (addingToCart || purchaseBlocked) && styles.buttonDisabled,
             ]}
             activeOpacity={0.9}
-            disabled={addingToCart || variantPricingLoading}
+            disabled={addingToCart || purchaseBlocked}
             onPress={handleAddToCart}
           >
             {addingToCart || variantPricingLoading ? (
@@ -1113,7 +1128,7 @@ export default function ProductDetailScreen() {
             ) : (
               <>
                 <Feather name="shopping-cart" size={20} color={white} />
-                <Text style={styles.addToCartText}>Agregar al carrito</Text>
+                <Text style={styles.addToCartText}>{unavailable ? "No disponible" : "Agregar al carrito"}</Text>
               </>
             )}
           </TouchableOpacity>

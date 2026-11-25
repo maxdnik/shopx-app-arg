@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState, useRef } from "react";
 import {
   ActivityIndicator,
   AppState,
+  Alert,
   Image,
   Linking,
   RefreshControl,
@@ -17,9 +18,10 @@ import { AppBottomNav } from "../../components/AppBottomNav";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { formatUSD } from "../../lib/api";
 import { fetchCurrentUser, getStoredUser, ShopXUser } from "../../lib/auth";
-import { listStatus, miniProgress, orderGroup, orderMilestone, storedARS } from "../../lib/order-tracking/list-model";
+import { isBonifiedOrder, listStatus, miniProgress, orderGroup, orderMilestone, storedARS } from "../../lib/order-tracking/list-model";
 import { dateLabel } from "../../lib/order-tracking/view-model";
 import { AppOrder, createMercadoPagoCheckout, getAppOrders } from "../../lib/orders";
+import { mercadoPagoUrl, samePaymentAmount } from "../../lib/payment-handoff";
 
 const navy = "#062B4F";
 const navyDark = "#031A33";
@@ -64,7 +66,7 @@ function getItemsCount(order: AppOrder) {
 
 function isDelivered(order: AppOrder) { return orderGroup(order) === "delivered"; }
 function isCancelled(order: AppOrder) { return orderGroup(order) === "cancelled"; }
-function isPendingPayment(order: AppOrder) { return order.status === "pending_payment" && !isCancelled(order); }
+function isPendingPayment(order: AppOrder) { return order.status === "pending_payment" && !isCancelled(order) && !isBonifiedOrder(order); }
 function isActive(order: AppOrder) { return orderGroup(order) === "active"; }
 
 function getStatusMeta(order: AppOrder) {
@@ -152,7 +154,7 @@ export default function OrdersScreen() {
 
   async function handlePay(order: AppOrder) {
     const orderId = getOrderId(order);
-    if (!orderId || payingOrderId) return;
+    if (!orderId || payingOrderId || !isPendingPayment(order)) return;
 
     try {
       setPayingOrderId(orderId);
@@ -160,14 +162,16 @@ export default function OrdersScreen() {
         orderId,
         email: user?.email || order.buyer?.email,
         phone: user?.phone || order.buyer?.phone,
+        expectedTotalARS: order.totalARS,
       });
 
-      const url = checkout.init_point || checkout.sandbox_init_point;
-      if (!url) throw new Error("Mercado Pago no devolvió un link de pago.");
-
-      await Linking.openURL(url);
+      if (!samePaymentAmount(order.totalARS ?? 0, checkout.totalARS)) {
+        await loadOrders({ silent: true });
+        throw new Error("El importe del pedido se actualizó. Revisalo antes de volver a pagar.");
+      }
+      await Linking.openURL(mercadoPagoUrl(checkout));
     } catch (err: any) {
-      alert(err?.message || "No pudimos abrir el pago.");
+      Alert.alert("No pudimos abrir el pago", err?.message || "Intentá nuevamente.");
     } finally {
       setPayingOrderId(null);
     }
@@ -252,7 +256,7 @@ export default function OrdersScreen() {
             </Text>
 
             <View style={styles.amountRow}>
-              <Text style={styles.totalUSD}>{formatUSD(totalUSD)}</Text>
+              <Text style={styles.totalUSD}>{isBonifiedOrder(order) ? "Bonificado" : formatUSD(totalUSD)}</Text>
               {totalARS ? <Text style={styles.totalARS}>{totalARS}</Text> : null}
             </View>
           </View>

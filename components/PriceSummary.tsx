@@ -3,7 +3,12 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { formatUSD } from "../lib/api";
 import { PriceRow, summarizePrices } from "../lib/price-summary";
 
-export function PriceSummary({ rows }: { rows: PriceRow[] }) {
+export function PriceSummary({ rows, currency = "USD" }: { rows: PriceRow[]; currency?: "USD" | "ARS" }) {
+  // Only show ARS rows when the server supplied every amount, including mixed FX.
+  const showArs = currency === "ARS" && rows.every((row) => Number.isFinite(row.amountARS));
+  const formatAmount = (row: PriceRow) => showArs
+    ? `AR$ ${Number(row.amountARS).toLocaleString("es-AR", { maximumFractionDigits: 2 })}`
+    : `USD ${formatUSD(row.amount)}`;
   return (
     <View style={{ gap: 13 }}>
       {summarizePrices(rows).map((row) => (
@@ -18,7 +23,7 @@ export function PriceSummary({ rows }: { rows: PriceRow[] }) {
                 row.details
                   .map(
                     (detail) =>
-                      `${detail.label}: USD ${formatUSD(detail.amount)}`,
+                      `${detail.label}: ${formatAmount(detail)}`,
                   )
                   .join("\n"),
               )
@@ -27,7 +32,7 @@ export function PriceSummary({ rows }: { rows: PriceRow[] }) {
             <Text style={styles.text}>{row.label}</Text>
             <Feather name="info" size={15} color="#718096" />
           </TouchableOpacity>
-          <Text style={styles.amount}>USD {formatUSD(row.amount)}</Text>
+          <Text style={styles.amount}>{formatAmount(row)}</Text>
         </View>
       ))}
     </View>

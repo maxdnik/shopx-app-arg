@@ -1,6 +1,8 @@
 // lib/auth.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildApiUrl } from "./config";
+import { isValidAccountEmail, validatePassword } from "./account-validation";
+import { ACCOUNT_TERMS_ERROR, PURCHASE_TERMS_VERSION, type PurchaseTermsInput } from "./purchase-terms";
 
 const AUTH_TOKEN_KEY = "shopx_auth_token";
 const AUTH_USER_KEY = "shopx_auth_user";
@@ -79,10 +81,18 @@ export type LoginPayload = {
 export type RegisterPayload = {
   fullName: string;
   email: string;
-  phone?: string;
   password: string;
-  dni?: string;
+  termsAcceptance?: PurchaseTermsInput;
 };
+
+export type RegistrationResponse = { ok: true; pendingVerification: true };
+
+export class AuthApiError extends Error {
+  constructor(message: string, public status: number, public code = "") {
+    super(message);
+    this.name = "AuthApiError";
+  }
+}
 
 export type GoogleLoginPayload = {
   idToken: string;
@@ -119,11 +129,11 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(text || "Respuesta inválida del servidor");
+    throw new AuthApiError("No pudimos comunicarnos con ShopX. Volvé a intentar.", response.status);
   }
 
   if (!response.ok || data?.ok === false) {
-    throw new Error(data?.message || data?.error || "Error de autenticación");
+    throw new AuthApiError(data?.message || data?.error || "Error de autenticación", response.status, data?.code || data?.error || "");
   }
 
   return data as T;
@@ -241,8 +251,17 @@ export async function loginWithAppleApp(
 
 export async function registerApp(
   payload: RegisterPayload,
-): Promise<ShopXUser> {
-  const response = await fetch(buildApiUrl("/api/app/auth/register"), {
+): Promise<RegistrationResponse> {
+  if (!payload.fullName.trim()) throw new Error("Ingresá tu nombre y apellido.");
+  if (!isValidAccountEmail(payload.email)) throw new Error("Ingresá un email válido.");
+  const password = validatePassword(payload.password);
+  if (!password.valid) throw new Error(password.errors.join(". "));
+  if (payload.termsAcceptance?.accepted !== true || payload.termsAcceptance.version !== PURCHASE_TERMS_VERSION) {
+    throw new Error(ACCOUNT_TERMS_ERROR);
+  }
+  // Reuse the web registration contract: a new account is verified by email.
+  // Registration never creates a native session or overwrites an existing one.
+  const response = await fetch(buildApiUrl("/api/auth/register"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -250,21 +269,14 @@ export async function registerApp(
     body: JSON.stringify({
       fullName: payload.fullName.trim(),
       email: cleanEmail(payload.email),
-      phone: payload.phone?.trim() || "",
       password: payload.password,
-      dni: payload.dni?.trim() || "",
+      termsAcceptance: payload.termsAcceptance,
     }),
   });
 
-  const data = await parseJsonResponse<AuthResponse>(response);
-
-  if (!data.token || !data.user) {
-    throw new Error("No se pudo crear la cuenta.");
-  }
-
-  await saveSession(data.token, data.user);
-
-  return data.user;
+  const data = await parseJsonResponse<RegistrationResponse>(response);
+  if (data.pendingVerification !== true) throw new Error("No pudimos confirmar el registro. Volvé a intentar.");
+  return data;
 }
 
 export async function fetchCurrentUser(): Promise<ShopXUser | null> {
@@ -284,12 +296,18 @@ export async function fetchCurrentUser(): Promise<ShopXUser | null> {
 
     if (!data.user) return null;
 
+    if (await getAuthToken() !== token) return getStoredUser();
     await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
 
     return data.user;
-  } catch {
-    await logoutApp();
-    return null;
+  } catch (error) {
+    if (await getAuthToken() !== token) return getStoredUser();
+    if (error instanceof AuthApiError && [401, 403].includes(error.status)) {
+      await logoutApp();
+      return null;
+    }
+    // A temporary network failure must not delete a valid saved session.
+    return getStoredUser();
   }
 }
 
@@ -324,6 +342,7 @@ export async function getAppAccount(): Promise<{
     throw new Error("No pudimos cargar tu cuenta.");
   }
 
+  if (await getAuthToken() !== token) throw new Error("La sesión cambió. Volvé a cargar tu cuenta.");
   await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
 
   return {
@@ -360,6 +379,7 @@ export async function updateAppAccount(payload: UpdateAccountPayload): Promise<{
     throw new Error("No pudimos actualizar tu cuenta.");
   }
 
+  if (await getAuthToken() !== token) throw new Error("La sesión cambió. Volvé a cargar tu cuenta.");
   await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
 
   return {
@@ -400,7 +420,7 @@ export async function deleteAppAccount(): Promise<boolean> {
   });
 
   await parseJsonResponse<{ ok: boolean }>(response);
-  await logoutApp();
+  if (await getAuthToken() === token) await logoutApp();
 
   return true;
 }
@@ -416,9 +436,7 @@ export async function isLoggedIn() {
 export async function forgotPasswordApp(email: string): Promise<boolean> {
   const clean = cleanEmail(email);
 
-  if (!clean) {
-    throw new Error("Ingresá tu email.");
-  }
+  if (!isValidAccountEmail(clean)) throw new Error("Ingresá un email válido.");
 
   const response = await fetch(buildApiUrl("/api/auth/forgot-password"), {
     method: "POST",
@@ -431,4 +449,16 @@ export async function forgotPasswordApp(email: string): Promise<boolean> {
   await parseJsonResponse<{ ok: boolean }>(response);
 
   return true;
+}
+
+export async function resendVerificationApp(email: string): Promise<string> {
+  const clean = cleanEmail(email);
+  if (!isValidAccountEmail(clean)) throw new Error("Ingresá un email válido.");
+  const response = await fetch(buildApiUrl("/api/auth/resend-verification"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: clean }),
+  });
+  const data = await parseJsonResponse<{ ok: boolean; message?: string }>(response);
+  return data.message || "Si la cuenta necesita verificación, te vamos a enviar un enlace a ese email.";
 }
